@@ -17,12 +17,14 @@ async function main() {
   const user = await prisma.user.create({
     data: {
       name: "Super Admin",
-      username: "admin", // ✅ add this
+      username: "admin",
       email: "admin@example.com",
       password: hashedPassword,
       is_super: true,
+      role: "super_admin", 
     },
   });
+  
 
   console.log(`✅ Superuser created: ${user.email}`);
 }

@@ -5,7 +5,7 @@ const prisma = new PrismaClient();
 
 const { JWT_SECRET, JWT_EXPIRES_IN } = process.env;
 
-// 🔐 Register new user (regular or super admin)
+// Register new user (regular or super admin)
 exports.register = async (req, res) => {
   try {
     const { name, username, email, password } = req.body;
@@ -40,7 +40,7 @@ exports.register = async (req, res) => {
 };
   
 
-// 🔐 Login and get JWT token
+// Login and get JWT token
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -70,7 +70,7 @@ exports.login = async (req, res) => {
 
 
 
-// 👥 Get all users
+// Get all users
 exports.getUsers = async (req, res) => {
   try {
     const users = await prisma.user.findMany({

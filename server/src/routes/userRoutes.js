@@ -1,11 +1,20 @@
 const express = require("express");
 const router = express.Router();
 const userController = require("../controllers/userController");
-const { mockAuth } = require("../middlewares/auth");
+const { authMiddleware } = require("../middlewares/auth");
 
-router.use(mockAuth);
+// Protect all user routes with JWT
+router.use(authMiddleware);
 
-router.post("/", userController.createUser); // Create User
-router.get("/", userController.getUsers); // List Users
+// 🛡️ List users — restricted to super admins
+router.get("/", async (req, res, next) => {
+  if (!req.user?.is_super) {
+    return res
+      .status(403)
+      .json({ message: "Forbidden: Super admin access only" });
+  }
+
+  return userController.getUsers(req, res, next);
+});
 
 module.exports = router;

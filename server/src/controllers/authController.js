@@ -5,7 +5,7 @@ const prisma = new PrismaClient();
 
 const { JWT_SECRET } = process.env;
 
-// 🔐 Login controller
+// Login controller
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -33,7 +33,7 @@ exports.login = async (req, res) => {
   }
 };
 
-// 🔐 Registration (only normal users; is_super = false always)
+// Registration (only normal users; is_super = false always)
 exports.register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
