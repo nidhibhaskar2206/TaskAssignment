@@ -1,7 +1,7 @@
 const express = require("express");
-const dotenv = require("dotenv");
 const PORT = process.env.PORT || 4000;
 const prisma = require('./config/db');
+require("dotenv").config();
 
 async function main() {
   try {
@@ -11,7 +11,7 @@ async function main() {
   } catch (error) {
     console.error('Failed to connect to the database');
     console.error(error);
-    process.exit(1); // Exit the process with an error code
+    process.exit(1); 
   } finally {
     await prisma.$disconnect();
   }

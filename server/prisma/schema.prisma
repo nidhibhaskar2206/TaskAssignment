@@ -1,95 +1,216 @@
 generator client {
-    provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-    provider = "postgresql"
-    url      = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["Core", "Workspace"]
 }
 
-model User {
-    user_id     Int         @id @default(autoincrement())
-    name        String
-    username    String      @unique
-    password    String
-    email       String      @unique
-    role        String
-    is_super    Boolean     @default(false)
+//
+// ===== Core Schema =====
+//
 
-    tasks       Task[]      @relation("CreatedTasks") // created_by
-    ownedTasks  Task[]      @relation("OwnedTasks")   // owner_id
-    taskRoles   TaskUser[] 
-    taskAdminOf TaskAdmin[] @relation("AdminOfTasks")
-    logs        Log[] 
+model Workspace {
+  id         String     @id @default(uuid())
+  name       String
+  created_by String
+  created_at DateTime   @default(now())
+  admin_id   String
+  admin      Users      @relation(fields: [admin_id], references: [id])
+  users      UserRole[]
+  roles      Role[]
+
+  @@map("Workspace")
+  @@schema("Core")
 }
 
+model Users {
+  id                     String      @id @default(uuid())
+  name                   String
+  email                  String      @unique
+  password               String
+  user_type              UserType
+  is_active              Boolean      @default(true)
+  mfa_enabled            Boolean
+  created_at             DateTime    @default(now())
+  created_by             String
+  created_by_user Users? @relation("CreatedBy", fields: [created_by], references: [id])
+  updated_at             DateTime?   @updatedAt
+  updated_by             String?
+  updated_by_user Users? @relation("UpdatedBy", fields: [updated_by], references: [id])
+  roles                  UserRole[]
+  workspaces             Workspace[] @relation("WorkspaceAdmin")
 
-model Task {
-    task_id        Int         @id @default(autoincrement())
-    title          String
-    description    String?
-    created_by     Int
-    owner_id       Int
-    parent_task_id Int?        // For subtask hierarchy
-
-    creator        User        @relation("CreatedTasks", fields: [created_by], references: [user_id])
-    owner          User        @relation("OwnedTasks", fields: [owner_id], references: [user_id])
-    parent_task    Task?       @relation("Subtasks", fields: [parent_task_id], references: [task_id])
-    subtasks       Task[]      @relation("Subtasks")
-
-    admin          TaskAdmin?
-    taskUsers      TaskUser[]
-    logs           Log[]
+  @@map("Users")
+  @@schema("Core")
 }
-
 
 model Role {
-    role_id     Int          @id @default(autoincrement())
-    role_name   String       @unique
-    permissions Permission[] @relation("RolePermissions")
-    taskUsers   TaskUser[]
+  id           String         @id @default(uuid())
+  workspace_id String
+  workspace    Workspace      @relation(fields: [workspace_id], references: [id])
+  name         String
+  desc         String?
+  permissions  RolePermission[]
+  users        UserRole[]
+
+  @@unique([workspace_id, name])
+  @@map("Role")
+  @@schema("Core")
 }
 
 model Permission {
-    id    Int    @id @default(autoincrement())
-    name  String @unique
-    roles Role[] @relation("RolePermissions")
+  id        String         @id @default(uuid())
+  entity    String
+  operation Operation
+  roles     RolePermission[]
+
+  @@unique([entity, operation])
+  @@map("Permission")
+  @@schema("Core")
 }
 
-model TaskAdmin {
-    task_id  Int  @id
-    admin_id Int
-    task     Task @relation(fields: [task_id], references: [task_id])
-    admin    User @relation("AdminOfTasks", fields: [admin_id], references: [user_id])
+model RolePermission {
+  id            String     @id @default(uuid())
+  role_id       String
+  permission_id String
+
+  role       Role       @relation(fields: [role_id], references: [id])
+  permission Permission @relation(fields: [permission_id], references: [id])
+
+  @@unique([role_id, permission_id])
+  @@map("RolePermission")
+  @@schema("Core")
 }
 
-model TaskUser {
-    task_id Int
-    user_id Int
-    role_id Int
+model UserRole {
+  id           String     @id @default(uuid())
+  user_id      String
+  role_id      String
+  workspace_id String
 
-    task Task @relation(fields: [task_id], references: [task_id])
-    user User @relation(fields: [user_id], references: [user_id])
-    role Role @relation(fields: [role_id], references: [role_id])
+  user      Users     @relation(fields: [user_id], references: [id])
+  role      Role      @relation(fields: [role_id], references: [id])
+  workspace Workspace @relation(fields: [workspace_id], references: [id])
 
-    @@id([task_id, user_id])
+  @@map("UserRole")
+  @@schema("Core")
 }
 
-model Log {
-    log_id    Int      @id @default(autoincrement())
-    task_id   Int
-    user_id   Int?
-    action    String
-    timestamp DateTime @default(now())
+model MFACodes {
+    id          String     @id @default(uuid())
+    user_id     String
+    user        Users      @relation(fields: [user_id], references: [id])
+    code        String
+    created_at  DateTime   @default(now())
 
-    task Task  @relation(fields: [task_id], references: [task_id])
-    user User? @relation(fields: [user_id], references: [user_id])
+    @@map("MFACodes")
+    @@schema("Core")
 }
 
+enum UserType {
+  SUPER_ADMIN
+  OTHER
+}
 
-enum PermissionEnum {
+enum Operation {
+  CREATE
   READ
-  WRITE
+  UPDATE
   DELETE
-  ASSIGN
+  COMMENT
+  MANAGE
 }
+
+//
+// ===== Workspace Schema =====
+//
+
+model Tickets {
+  id            String     @id @default(uuid())
+  workspace_id  String
+  ticket_type   TicketType
+  title         String
+  desc          String
+  status        TicketStatus
+  priority      TicketPriority
+  created_by    String
+  created_at    DateTime   @default(now())
+  updated_by    String?
+  updated_at    DateTime?  @updatedAt
+  due_date      DateTime? 
+  type          String
+  assigned_to   String
+  parent_id     String?
+
+  workspace  Workspace @relation(fields: [workspace_id], references: [id])
+  updated_by_user Users? @relation("UpdatedBy", fields: [updated_by], references: [id])
+  created_by_user Users @relation("CreatedBy", fields: [created_by], references: [id])
+  assignee   Users     @relation(fields: [assigned_to], references: [id], schema: "Core")
+  parent     Tickets?  @relation("Subtasks", fields: [parent_id], references: [id])
+  subtasks   Tickets[] @relation("Subtasks")
+  comments   Comments[]
+
+  @@map("Tickets")
+  @@schema("Workspace")
+}
+
+model Comments {
+  id           String     @id @default(uuid())
+  workspace_id String
+  ticket_id    String
+  user_id      String
+  message      String
+  created_at   DateTime   @default(now())
+  parent_id    String?
+
+  workspace  Workspace @relation(fields: [workspace_id], references: [id])
+  ticket     Tickets   @relation(fields: [ticket_id], references: [id])
+  user       Users     @relation(fields: [user_id], references: [id])
+  parent     Comments? @relation("CommentReplies", fields: [parent_id], references: [id])
+  replies    Comments[] @relation("CommentReplies")
+
+  @@map("Comments")
+  @@schema("Workspace")
+}
+
+
+model History {
+  id           String     @id @default(uuid())
+  workspace_id String
+  ticket_id    String
+  field_changed String
+  old_value    String?
+  new_value    String?
+  changed_at DateTime   @default(now())
+  action       String
+  changed_by  String
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id])
+  ticket    Tickets   @relation(fields: [ticket_id], references: [id])
+  chnaged_by_user Users @relation("ChangedBy", fields: [changed_by], references: [id])
+
+  @@map("History")
+  @@schema("Workspace")
+}
+
+enum TicketType {
+    TASK
+    RAID
+}
+
+enum TicketStatus {
+    OPEN
+    IN_PROGRESS
+    CLOSED
+    ON_HOLD
+}
+enum TicketPriority {
+    LOW
+    MEDIUM
+    HIGH
+    CRITICAL
+}
+
