@@ -21,36 +21,52 @@ model Workspace {
   admin      Users      @relation(fields: [admin_id], references: [id])
   users      UserRole[]
   roles      Role[]
+  Tickets    Tickets[]
+  Comments   Comments[]
+  History    History[]
 
   @@map("Workspace")
   @@schema("Core")
 }
 
 model Users {
-  id                     String      @id @default(uuid())
-  name                   String
-  email                  String      @unique
-  password               String
-  user_type              UserType
-  is_active              Boolean      @default(true)
-  mfa_enabled            Boolean
-  created_at             DateTime    @default(now())
-  created_by             String
+  id          String    @id @default(uuid())
+  name        String
+  email       String    @unique
+  password    String
+  user_type   UserType
+  is_active   Boolean   @default(true)
+  mfa_enabled Boolean
+  created_at  DateTime  @default(now())
+  created_by  String
+  updated_at  DateTime? @updatedAt
+  updated_by  String?
+
   created_by_user Users? @relation("CreatedBy", fields: [created_by], references: [id])
-  updated_at             DateTime?   @updatedAt
-  updated_by             String?
   updated_by_user Users? @relation("UpdatedBy", fields: [updated_by], references: [id])
-  roles                  UserRole[]
-  workspaces             Workspace[] @relation("WorkspaceAdmin")
+
+  created_users    Users[]    @relation("CreatedBy")
+  updated_users    Users[]    @relation("UpdatedBy")
+  created_tickets  Tickets[]  @relation("TicketCreator")
+  updated_tickets  Tickets[]  @relation("TicketUpdater")
+  assigned_tickets Tickets[]  @relation("TicketAssignee")
+  comments         Comments[] @relation("CommentAuthor")
+  history_entries  History[]  @relation("ChangedBy")
+
+  roles      UserRole[]
+  workspaces Workspace[]
+  MFACodes   MFACodes[]
+  Tickets    Tickets[]
+  Comments   Comments[]
 
   @@map("Users")
   @@schema("Core")
 }
 
 model Role {
-  id           String         @id @default(uuid())
+  id           String           @id @default(uuid())
   workspace_id String
-  workspace    Workspace      @relation(fields: [workspace_id], references: [id])
+  workspace    Workspace        @relation(fields: [workspace_id], references: [id])
   name         String
   desc         String?
   permissions  RolePermission[]
@@ -62,7 +78,7 @@ model Role {
 }
 
 model Permission {
-  id        String         @id @default(uuid())
+  id        String           @id @default(uuid())
   entity    String
   operation Operation
   roles     RolePermission[]
@@ -73,7 +89,7 @@ model Permission {
 }
 
 model RolePermission {
-  id            String     @id @default(uuid())
+  id            String @id @default(uuid())
   role_id       String
   permission_id String
 
@@ -86,7 +102,7 @@ model RolePermission {
 }
 
 model UserRole {
-  id           String     @id @default(uuid())
+  id           String @id @default(uuid())
   user_id      String
   role_id      String
   workspace_id String
@@ -100,19 +116,22 @@ model UserRole {
 }
 
 model MFACodes {
-    id          String     @id @default(uuid())
-    user_id     String
-    user        Users      @relation(fields: [user_id], references: [id])
-    code        String
-    created_at  DateTime   @default(now())
+  id      String @id @default(uuid())
+  user_id String
+  user    Users  @relation(fields: [user_id], references: [id])
 
-    @@map("MFACodes")
-    @@schema("Core")
+  code       String
+  created_at DateTime @default(now())
+
+  @@map("MFACodes")
+  @@schema("Core")
 }
 
 enum UserType {
   SUPER_ADMIN
   OTHER
+
+  @@schema("Core")
 }
 
 enum Operation {
@@ -122,6 +141,8 @@ enum Operation {
   DELETE
   COMMENT
   MANAGE
+
+  @@schema("Core")
 }
 
 //
@@ -129,88 +150,99 @@ enum Operation {
 //
 
 model Tickets {
-  id            String     @id @default(uuid())
-  workspace_id  String
-  ticket_type   TicketType
-  title         String
-  desc          String
-  status        TicketStatus
-  priority      TicketPriority
-  created_by    String
-  created_at    DateTime   @default(now())
-  updated_by    String?
-  updated_at    DateTime?  @updatedAt
-  due_date      DateTime? 
-  type          String
-  assigned_to   String
-  parent_id     String?
+  id           String         @id @default(uuid())
+  workspace_id String
+  ticket_type  TicketType
+  title        String
+  desc         String
+  status       TicketStatus
+  priority     TicketPriority
+  created_by   String
+  created_at   DateTime       @default(now())
+  updated_by   String?
+  updated_at   DateTime?      @updatedAt
+  due_date     DateTime?
+  type         String
+  assigned_to  String
+  parent_id    String?
 
-  workspace  Workspace @relation(fields: [workspace_id], references: [id])
-  updated_by_user Users? @relation("UpdatedBy", fields: [updated_by], references: [id])
-  created_by_user Users @relation("CreatedBy", fields: [created_by], references: [id])
-  assignee   Users     @relation(fields: [assigned_to], references: [id], schema: "Core")
-  parent     Tickets?  @relation("Subtasks", fields: [parent_id], references: [id])
-  subtasks   Tickets[] @relation("Subtasks")
-  comments   Comments[]
+  workspace       Workspace @relation(fields: [workspace_id], references: [id])
+  created_by_user Users     @relation("TicketCreator", fields: [created_by], references: [id])
+  updated_by_user Users?    @relation("TicketUpdater", fields: [updated_by], references: [id])
+  assignee        Users     @relation("TicketAssignee", fields: [assigned_to], references: [id])
+
+  parent   Tickets?   @relation("Subtasks", fields: [parent_id], references: [id])
+  subtasks Tickets[]  @relation("Subtasks")
+  comments Comments[]
+  Users    Users?     @relation(fields: [usersId], references: [id])
+  usersId  String?
+  History  History[]
 
   @@map("Tickets")
   @@schema("Workspace")
 }
 
 model Comments {
-  id           String     @id @default(uuid())
+  id           String   @id @default(uuid())
   workspace_id String
   ticket_id    String
   user_id      String
   message      String
-  created_at   DateTime   @default(now())
+  created_at   DateTime @default(now())
   parent_id    String?
 
-  workspace  Workspace @relation(fields: [workspace_id], references: [id])
-  ticket     Tickets   @relation(fields: [ticket_id], references: [id])
-  user       Users     @relation(fields: [user_id], references: [id])
-  parent     Comments? @relation("CommentReplies", fields: [parent_id], references: [id])
-  replies    Comments[] @relation("CommentReplies")
+  workspace Workspace  @relation(fields: [workspace_id], references: [id])
+  ticket    Tickets    @relation(fields: [ticket_id], references: [id])
+  user      Users      @relation("CommentAuthor", fields: [user_id], references: [id])
+  parent    Comments?  @relation("CommentReplies", fields: [parent_id], references: [id])
+  replies   Comments[] @relation("CommentReplies")
+  Users     Users?     @relation(fields: [usersId], references: [id])
+  usersId   String?
 
   @@map("Comments")
   @@schema("Workspace")
 }
 
-
 model History {
-  id           String     @id @default(uuid())
-  workspace_id String
-  ticket_id    String
+  id            String   @id @default(uuid())
+  workspace_id  String
+  ticket_id     String
   field_changed String
-  old_value    String?
-  new_value    String?
-  changed_at DateTime   @default(now())
-  action       String
-  changed_by  String
+  old_value     String?
+  new_value     String?
+  changed_at    DateTime @default(now())
+  action        String
+  changed_by    String
 
-  workspace Workspace @relation(fields: [workspace_id], references: [id])
-  ticket    Tickets   @relation(fields: [ticket_id], references: [id])
-  chnaged_by_user Users @relation("ChangedBy", fields: [changed_by], references: [id])
+  workspace       Workspace @relation(fields: [workspace_id], references: [id])
+  ticket          Tickets   @relation(fields: [ticket_id], references: [id])
+  chnaged_by_user Users     @relation("ChangedBy", fields: [changed_by], references: [id])
 
   @@map("History")
   @@schema("Workspace")
 }
 
 enum TicketType {
-    TASK
-    RAID
+  TASK
+  RAID
+
+  @@schema("Workspace")
 }
 
 enum TicketStatus {
-    OPEN
-    IN_PROGRESS
-    CLOSED
-    ON_HOLD
-}
-enum TicketPriority {
-    LOW
-    MEDIUM
-    HIGH
-    CRITICAL
+  OPEN
+  IN_PROGRESS
+  CLOSED
+  ON_HOLD
+
+  @@schema("Workspace")
 }
 
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@schema("Workspace")
+}
