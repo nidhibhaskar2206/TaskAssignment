@@ -38,15 +38,7 @@ model Users {
   is_active   Boolean   @default(true)
   mfa_enabled Boolean
   created_at  DateTime  @default(now())
-  created_by  String
-  updated_at  DateTime? @updatedAt
-  updated_by  String?
 
-  created_by_user Users? @relation("CreatedBy", fields: [created_by], references: [id])
-  updated_by_user Users? @relation("UpdatedBy", fields: [updated_by], references: [id])
-
-  created_users    Users[]    @relation("CreatedBy")
-  updated_users    Users[]    @relation("UpdatedBy")
   created_tickets  Tickets[]  @relation("TicketCreator")
   updated_tickets  Tickets[]  @relation("TicketUpdater")
   assigned_tickets Tickets[]  @relation("TicketAssignee")
@@ -56,8 +48,6 @@ model Users {
   roles      UserRole[]
   workspaces Workspace[]
   MFACodes   MFACodes[]
-  Tickets    Tickets[]
-  Comments   Comments[]
 
   @@map("Users")
   @@schema("Core")
@@ -96,7 +86,6 @@ model RolePermission {
   role       Role       @relation(fields: [role_id], references: [id])
   permission Permission @relation(fields: [permission_id], references: [id])
 
-  @@unique([role_id, permission_id])
   @@map("RolePermission")
   @@schema("Core")
 }
@@ -162,7 +151,6 @@ model Tickets {
   updated_by   String?
   updated_at   DateTime?      @updatedAt
   due_date     DateTime?
-  type         String
   assigned_to  String
   parent_id    String?
 
@@ -174,8 +162,6 @@ model Tickets {
   parent   Tickets?   @relation("Subtasks", fields: [parent_id], references: [id])
   subtasks Tickets[]  @relation("Subtasks")
   comments Comments[]
-  Users    Users?     @relation(fields: [usersId], references: [id])
-  usersId  String?
   History  History[]
 
   @@map("Tickets")
@@ -196,8 +182,6 @@ model Comments {
   user      Users      @relation("CommentAuthor", fields: [user_id], references: [id])
   parent    Comments?  @relation("CommentReplies", fields: [parent_id], references: [id])
   replies   Comments[] @relation("CommentReplies")
-  Users     Users?     @relation(fields: [usersId], references: [id])
-  usersId   String?
 
   @@map("Comments")
   @@schema("Workspace")
@@ -216,7 +200,7 @@ model History {
 
   workspace       Workspace @relation(fields: [workspace_id], references: [id])
   ticket          Tickets   @relation(fields: [ticket_id], references: [id])
-  chnaged_by_user Users     @relation("ChangedBy", fields: [changed_by], references: [id])
+  changed_by_user Users @relation("ChangedBy", fields: [changed_by], references: [id])
 
   @@map("History")
   @@schema("Workspace")

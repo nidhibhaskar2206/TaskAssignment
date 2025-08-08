@@ -1,36 +1,43 @@
-const { PrismaClient } = require("@prisma/client");
-const bcrypt = require("bcryptjs");
+// prisma/seed.js
+const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  const existing = await prisma.user.findUnique({
-    where: { email: "admin@example.com" },
-  });
-
-  if (existing) {
-    console.log("Superuser already exists");
-    return;
-  }
-
-  const hashedPassword = await bcrypt.hash("superpassword", 10);
-
-  const user = await prisma.user.create({
+  // Create a SUPER_ADMIN user
+  const admin = await prisma.users.create({
     data: {
-      name: "Super Admin",
-      username: "admin",
-      email: "admin@example.com",
-      password: hashedPassword,
-      is_super: true,
-      role: "super_admin", 
-    },
+      name: 'Super Admin',
+      email: 'admin@example.com',
+      password: 'hashed_password', // Use hashed value in real app
+      user_type: 'SUPER_ADMIN',
+      mfa_enabled: false,
+    }
   });
-  
 
-  console.log(`✅ Superuser created: ${user.email}`);
+  // Create a Workspace with that admin
+  const workspace = await prisma.workspace.create({
+    data: {
+      name: 'Main Workspace',
+      admin_id: admin.id,
+      created_by: admin.id
+    }
+  });
+
+  // Create a Role in that Workspace
+  await prisma.role.create({
+    data: {
+      name: 'Admin',
+      desc: 'Admin role for workspace',
+      workspace_id: workspace.id
+    }
+  });
+
+  console.log('🌱 Seed data created successfully!');
 }
 
 main()
   .catch((e) => {
-    console.error("❌ Error seeding superuser:", e);
+    console.error(e);
+    process.exit(1);
   })
   .finally(() => prisma.$disconnect());
