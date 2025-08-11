@@ -1,50 +1,23 @@
-const { createClient } = require("redis");
+const Redis = require('ioredis');
 
-const redisClient = createClient({
-  url: process.env.REDIS_URL, 
-  socket: {
-    reconnectStrategy: (retries) => {
-      console.warn(` Redis reconnect attempt: ${retries}`);
-      if (retries > 5) return false;
-      return Math.min(retries * 200, 5000);
-    },
-  },
+const redis = new Redis(process.env.REDIS_URL, {
+  maxRetriesPerRequest: null,
 });
 
-redisClient.on("connect", () => console.log("✅ Redis Client Connected"));
-redisClient.on("error", (err) => console.error("❌ Redis Client Error:", err));
+redis.on('connect', () => {
+  console.log('🔌 Redis: connection established.');
+});
 
-(async () => {
-  try {
-    if (!redisClient.isOpen) {
-      await redisClient.connect();
-    }
-    await redisClient.ping();
-  } catch (err) {
-    console.error("🔥 Redis connection failed:", err);
-    process.exit(1);
-  }
-})();
+redis.on('ready', () => {
+  console.log('✅ Redis: ready to use.');
+});
 
-const shutdownRedis = async () => {
-  if (redisClient?.isOpen) {
-    try {
-      await redisClient.quit();
-      console.log("✅ Redis disconnected.");
-    } catch (err) {
-      console.error("❌ Redis disconnect error:", err);
-    }
-  }
-};
+redis.on('error', (err) => {
+  console.error('❌ Redis: connection error ->', err.message);
+});
 
-// Graceful shutdown handling
-const shutdown = async (signal) => {
-  console.log(`🛑 Received ${signal}, shutting down...`);
-  await shutdownRedis();
-  process.exit(0);
-};
+redis.on('end', () => {
+  console.log('🛑 Redis: connection closed.');
+});
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
-
-module.exports = redisClient;
+module.exports = redis;
