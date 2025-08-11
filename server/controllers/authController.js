@@ -5,6 +5,9 @@ const emailQueue = require("../queues/emailQueue");
 const prisma = require("../config/db");
 const redis = require("../config/redis");
 
+const OTP_TTL_SECONDS = 600; // 10 minutes
+const THROTTLE_SECONDS = 15;
+
 const registerUser = async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -23,11 +26,11 @@ const registerUser = async (req, res) => {
 
     const tempUser = { name, email, password: hashedPassword };
 
-    await redis.setex(`otp:register:${email}`, 600, JSON.stringify(tempUser)); 
+    await redis.setex(`otp:register:${email}`, OTP_TTL_SECONDS, JSON.stringify(tempUser)); 
 
     const otp = generateOTP();
 
-    await redis.setex(`otp:code:${email}`, 600, otp);
+    await redis.setex(`otp:code:${email}`, OTP_TTL_SECONDS, otp);
 
     await emailQueue.add("sendOtpEmail", {
       to: email,
@@ -112,17 +115,8 @@ const loginUser = async (req, res) => {
   }
 }
 
-/* =========================
- * PASSWORD RESET
- * ========================= */
 
-/**
- * Step 1: requestPasswordReset
- * - Check user exists
- * - Throttle requests
- * - Generate & save OTP in Redis with TTL
- * - Queue email
- */
+
 const requestPasswordReset = async (req, res) => {
   try {
     const { email } = req.body;
@@ -162,10 +156,6 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ message: "Email, OTP and newPassword are required" });
     }
 
-    if (newPassword.length < 8) {
-      return res.status(400).json({ message: "Password must be at least 8 characters" });
-    }
-
     const storedOtp = await redis.get(`otp:reset:code:${email}`);
     if (!storedOtp || storedOtp !== otp) {
       return res.status(401).json({ message: "Invalid or expired OTP" });
@@ -177,10 +167,8 @@ const resetPassword = async (req, res) => {
     const hashed = await bcrypt.hash(newPassword, 10);
     await prisma.users.update({ where: { id: user.id }, data: { password: hashed } });
 
-    // cleanup
     await redis.del(`otp:reset:code:${email}`);
 
-    // (optional) invalidate sessions / tokens here if you keep a token blacklist
 
     res.status(200).json({ message: "Password has been reset successfully." });
   } catch (error) {
@@ -190,4 +178,4 @@ const resetPassword = async (req, res) => {
 };
 
 
-module.exports = { registerUser, verifyOTP, loginUser, requestPasswordReset, resetPassword};
+module.exports = { registerUser, verifyOTP, loginUser, requestPasswordReset, resetPassword };
