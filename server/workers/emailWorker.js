@@ -3,7 +3,10 @@ const { Worker } = require('bullmq');
 const IORedis = require('ioredis');
 const { sendOTPEmail } = require('../services/emailService');
 
-const connection = new IORedis(process.env.REDIS_URL);
+const connection = new IORedis(process.env.REDIS_URL, {
+  maxRetriesPerRequest: null,   // <-- required by BullMQ
+  // enableReadyCheck: false,   // optional
+});
 
 const emailWorker = new Worker(
   'emailQueue',
@@ -15,9 +18,8 @@ const emailWorker = new Worker(
 );
 
 emailWorker.on('completed', (job) => {
-  console.log(`Email job ${job.id} completed.`);
+  console.log(`✅ Email job ${job.id} completed`);
 });
-
 emailWorker.on('failed', (job, err) => {
-  console.error(`Email job ${job.id} failed:`, err.message);
+  console.error(`❌ Email job ${job?.id} failed:`, err?.message);
 });
