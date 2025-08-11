@@ -36,6 +36,7 @@ model Users {
   password    String
   user_type   UserType
   is_active   Boolean   @default(true)
+  is_verified Boolean   @default(false)
   mfa_enabled Boolean
   created_at  DateTime  @default(now())
 
