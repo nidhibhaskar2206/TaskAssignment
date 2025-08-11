@@ -27,7 +27,7 @@ const authMiddleware = async (req, res, next) => {
   }
 }
 
-const isSUPERADMIN = (req, res, next) => {
+const isSuperAdmin = (req, res, next) => {
   if (req.user?.user_type !== 'SUPERADMIN') {
     return res.status(403).json({ message: 'Access denied: Only Super Admin is authorized to create workspace.' });
   }
@@ -35,4 +35,4 @@ const isSUPERADMIN = (req, res, next) => {
 }
 
 
-module.exports = {authMiddleware, isSUPERADMIN};
+module.exports = {authMiddleware, isSuperAdmin};

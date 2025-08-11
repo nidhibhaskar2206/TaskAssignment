@@ -108,7 +108,7 @@ const loginUser = async (req, res) => {
 
     const token = jwt.sign({ userId: user.id, email: user.email },process.env.JWT_SECRET);
 
-    res.status(200).json({ message: "Login successful", token, user: { name: user.name, email: user.email } });
+    res.status(200).json({ message: "Login successful", token, user: { name: user.name, email: user.email, role:user.user_type } });
   } catch (error) {
     console.error("Login error:", error);
     res.status(500).json({ message: "Something went wrong" });
