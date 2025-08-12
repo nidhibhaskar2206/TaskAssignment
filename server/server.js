@@ -2,6 +2,7 @@ const express = require("express");
 const prisma = require('./config/db');
 require("dotenv").config();
 const authRoutes = require('./routes/authRoutes');
+const workspaceRoutes = require('./routes/workspaceRoutes');
 
 const PORT = process.env.PORT || 4000;
 
@@ -24,6 +25,7 @@ main();
 const app = express();
 app.use(express.json());
 app.use('/api/auth', authRoutes);
+app.use('/api/workspaces', workspaceRoutes);
 
 require('./workers/emailWorker');
 

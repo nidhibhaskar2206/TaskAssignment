@@ -5,6 +5,9 @@ const emailQueue = require("../queues/emailQueue");
 const prisma = require("../config/db");
 const redis = require("../config/redis");
 
+const THROTTLE_SECONDS = 15; 
+const OTP_TTL_SECONDS = 600; 
+
 const registerUser = async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -23,11 +26,11 @@ const registerUser = async (req, res) => {
 
     const tempUser = { name, email, password: hashedPassword };
 
-    await redis.setex(`otp:register:${email}`, 600, JSON.stringify(tempUser)); 
+    await redis.setex(`otp:register:${email}`, OTP_TTL_SECONDS, JSON.stringify(tempUser)); 
 
     const otp = generateOTP();
 
-    await redis.setex(`otp:code:${email}`, 600, otp);
+    await redis.setex(`otp:code:${email}`, OTP_TTL_SECONDS, otp);
 
     await emailQueue.add("sendOtpEmail", {
       to: email,
