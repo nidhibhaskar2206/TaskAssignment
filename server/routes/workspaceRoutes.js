@@ -1,6 +1,7 @@
 const express = require('express');
 const { createWorkspace, getUserWorkspaces, getWorkspaceById } = require('../controllers/workspaceController');
 const { authMiddleware, isSuperAdmin } = require('../middlewares/auth');
+const authorize = require('../middlewares/authorize');
 
 const router = express.Router();
 

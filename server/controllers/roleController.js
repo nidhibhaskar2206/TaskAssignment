@@ -191,10 +191,93 @@ const deleteRole = async (req, res) => {
   }
 };
 
+// controllers/roleController.js
+const bulkAssignRolesToUsers = async (req, res) => {
+  const workspaceId = req.params.id;
+  const { users = [], roles = [] } = req.body;
+
+  // Basic validation
+  if (!Array.isArray(users) || !Array.isArray(roles) || users.length !== roles.length || users.length === 0) {
+    return res.status(400).json({
+      message: "Provide non-empty 'users' and 'roles' arrays of equal length",
+    });
+  }
+
+  try {
+    // 1) Validate roles belong to the workspace
+    const roleIds = [...new Set(roles)];
+    const wsRoles = await prisma.role.findMany({
+      where: { id: { in: roleIds }, workspace_id: workspaceId },
+      select: { id: true },
+    });
+    const validRoleIdSet = new Set(wsRoles.map(r => r.id));
+    const invalidRoleIds = roleIds.filter(rid => !validRoleIdSet.has(rid));
+    if (invalidRoleIds.length) {
+      return res.status(404).json({
+        message: "Some roles do not belong to this workspace",
+        invalidRoleIds,
+      });
+    }
+
+    // 2) Validate users exist
+    const userIds = [...new Set(users)];
+    const foundUsers = await prisma.users.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true },
+    });
+    const foundUserIdSet = new Set(foundUsers.map(u => u.id));
+    const missingUsers = userIds.filter(uid => !foundUserIdSet.has(uid));
+    if (missingUsers.length) {
+      return res.status(404).json({
+        message: "Some users were not found",
+        missingUsers,
+      });
+    }
+
+    // 3) Upsert each (user, workspace) with the given role
+    // Requires @@unique([user_id, workspace_id]) on UserRole
+    const ops = users.map((userId, i) =>
+      prisma.userRole.upsert({
+        where: {
+          user_id_workspace_id: { user_id: userId, workspace_id: workspaceId },
+        },
+        update: { role_id: roles[i] },
+        create: {
+          user_id: userId,
+          workspace_id: workspaceId,
+          role_id: roles[i],
+        },
+      })
+    );
+
+    const results = await prisma.$transaction(ops);
+
+    // Optional: return enriched view
+    const enriched = await prisma.userRole.findMany({
+      where: { workspace_id: workspaceId, user_id: { in: userIds } },
+      include: {
+        role: true,
+        user: true,
+      },
+    });
+
+    res.status(200).json({
+      message: "Roles assigned",
+      count: results.length,
+      assignments: enriched,
+    });
+  } catch (err) {
+    console.error("bulkAssignRolesToUsers error:", err);
+    res.status(500).json({ message: "Failed to assign roles in bulk" });
+  }
+};
+
 module.exports = {
   createRole,
   addPermissionsToRole,
   assignRoleToUser,
   listWorkspaceRoles,
   deleteRole,
+  bulkAssignRolesToUsers, // <- export
 };
+
