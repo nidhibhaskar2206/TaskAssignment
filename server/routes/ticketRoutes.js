@@ -1,33 +1,32 @@
-const router = require("express").Router();
+const express = require("express");
+const router = express.Router();
+const {
+  createTicket,
+  listTickets,
+  getSubTasks,
+  getTicketById,
+  updateTicket,
+  deleteTicket,
+} = require("../controllers/ticketController");
 const { authenticate } = require("../middlewares/authenticate");
 const { workspaceContext } = require("../middlewares/workspaceContext");
 const {
   loadUserRoleInWorkspace,
 } = require("../middlewares/loadUserRoleInWorkspace");
-const { authorize } = require("../middlewares/authorize"); 
-const {
-  createTicket,
-  listTickets,
-  getTicket,
-  updateTicket,
-  closeTicket,
-  deleteTicket,
-} = require("../controllers/ticketController");
+const { authorize } = require("../middlewares/authorize");
 
-// POST /tickets/:wid/tickets
+// workpace-id
 router.post(
-  "/:wid/tickets",
+  "/:id/create-tickets",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
   authorize("TICKET", "CREATE"),
-  // validateSubtaskConstraint, inputGuard  // optional if you keep them
   createTicket
 );
 
-// GET /tickets/:wid/tickets
 router.get(
-  "/:wid/tickets",
+  "/:id/tickets",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
@@ -35,39 +34,36 @@ router.get(
   listTickets
 );
 
-// GET /tickets/:wid/tickets/:id
+// ticket-scoped
 router.get(
-  "/:wid/tickets/:id",
+  "/:ticketId/getTicket",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
   authorize("TICKET", "READ"),
-  getTicket
+  getTicketById
 );
 
-// PUT /tickets/:wid/tickets/:id
-router.put(
-  "/:wid/tickets/:id",
+router.get(
+  "/:ticketId/subtickets",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("TICKET", "UPDATE"), // your authorize can support allowOwner via opts
+  authorize("TICKET", "READ"),
+  getSubTasks
+);
+
+router.put(
+  "/:ticketId/updateTicket",
+  authenticate,
+  workspaceContext,
+  loadUserRoleInWorkspace,
+  authorize("TICKET", "UPDATE"),
   updateTicket
 );
 
-// POST /tickets/:wid/tickets/:id/close
-router.post(
-  "/:wid/tickets/:id/close",
-  authenticate,
-  workspaceContext,
-  loadUserRoleInWorkspace,
-  authorize("TICKET", "UPDATE"), // or MANAGE depending on your policy
-  closeTicket
-);
-
-// DELETE /tickets/:wid/tickets/:id
 router.delete(
-  "/:wid/tickets/:id",
+  "/:ticketId/deleteTicket",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,

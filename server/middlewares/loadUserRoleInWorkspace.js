@@ -7,7 +7,6 @@ async function loadUserRoleInWorkspace(req, res, next) {
         req.ctx.perms = new Set();
         return next();
     }
-
     const roles = await prisma.userRole.findMany({
       where: { user_id: req.user.id, workspace_id: req.ctx.workspaceId },
       select: {
@@ -23,14 +22,12 @@ async function loadUserRoleInWorkspace(req, res, next) {
         },
       },
     });
-
     const perms = new Set();
     roles.forEach((r) => {
       r.role.permissions.forEach((p) => {
         perms.add(`${p.permission.entity}:${p.permission.operation}`);
       });
     });
-
      req.ctx.perms = perms;
      req.ctx.roles = roles.map((r) => r.role.name);
      next();

@@ -1,89 +1,48 @@
-// controllers/ticketController.js
-const {
-  PrismaClient,
-  Operation,
-  TicketStatus,
-  TicketType,
-  TicketPriority,
-} = require("@prisma/client");
-const { z } = require("zod");
-const prisma = new PrismaClient();
+const prisma = require("../config/db");
 
-/* ============ tiny helpers ============ */
-const httpError = (res, code, msg, details) =>
-  res.status(code).json({ error: msg, details });
-
-const boolQ = (v) => (typeof v === "string" ? v.toLowerCase() === "true" : !!v);
-
-/** Write a single history/audit record */
-async function auditLogger({
-  tx = prisma,
-  workspace_id,
-  ticket_id,
-  action,
-  field_changed,
-  old_value,
-  new_value,
-  changed_by,
-}) {
-  await tx.history.create({
-    data: {
-      workspace_id,
-      ticket_id,
-      action,
-      field_changed: field_changed ?? action, // for CREATE/DELETE/CLOSE etc.
-      old_value: old_value ?? null,
-      new_value: new_value ?? null,
-      changed_by,
-    },
-  });
-}
-
-/** Ensures the assignee belongs to workspace (admin or appears in UserRole) */
-async function ensureAssigneeInWorkspace(tx, { workspace_id, assigned_to }) {
-  if (!assigned_to) return; // allow unassigned
-  // Check if user is workspace admin
-  const ws = await tx.workspace.findUnique({
-    where: { id: workspace_id },
-    select: { admin_id: true },
-  });
-  if (!ws)
-    throw Object.assign(new Error("Workspace not found"), { status: 404 });
-
-  if (ws.admin_id === assigned_to) return;
-
-  const exists = await tx.userRole.findFirst({
-    where: { workspace_id, user_id: assigned_to },
+async function assertUserInWorkspace(userId, workspaceId) {
+  const m = await prisma.userRole.findFirst({
+    where: { user_id: userId, workspace_id: workspaceId },
     select: { id: true },
   });
-  if (!exists) {
-    throw Object.assign(
-      new Error("Assigned user is not a member/admin of this workspace"),
-      { status: 422 }
-    );
+  if (!m) {
+    const e = new Error("User is not a member of this workspace");
+    e.status = 403;
+    throw e;
   }
 }
 
-/** Ensures parent ticket (if provided) exists in same workspace */
-async function ensureParentInWorkspace(tx, { workspace_id, parent_id }) {
-  if (!parent_id) return;
-  const parent = await tx.tickets.findFirst({
-    where: { id: parent_id, workspace_id },
-    select: { id: true },
-  });
-  if (!parent) {
-    throw Object.assign(
-      new Error("Parent ticket not found in this workspace"),
-      {
-        status: 422,
-      }
-    );
+async function getTicketAndAssertAccess(ticketId, userId) {
+  const t = await prisma.tickets.findUnique({ where: { id: ticketId } });
+  if (!t) {
+    const e = new Error("Ticket not found");
+    e.status = 404;
+    throw e;
   }
+  await assertUserInWorkspace(userId, t.workspace_id);
+  return t;
 }
 
-/** Compute diffs for history on update */
-function computeTicketDiffs(before, after) {
-  const FIELDS = [
+function normalizeForCompare(field, val) {
+  if (val === undefined) return undefined;
+  if (val === null) return null;
+
+  if (field === "due_date") {
+    const d = val instanceof Date ? val : new Date(val);
+    return isNaN(d) ? null : d.toISOString();
+  }
+
+  // enums: keep compare case-insensitive
+  if (field === "status" || field === "priority" || field === "ticket_type") {
+    return String(val).toUpperCase();
+  }
+
+  // ids and strings
+  return String(val);
+}
+
+function diffTicket(oldT, data) {
+  const fields = [
     "title",
     "desc",
     "status",
@@ -93,401 +52,359 @@ function computeTicketDiffs(before, after) {
     "parent_id",
     "ticket_type",
   ];
-  const diffs = [];
-  for (const f of FIELDS) {
-    const ov = before[f];
-    const nv = after[f];
-    // normalize dates
-    const ovS = ov instanceof Date ? ov.toISOString() : ov;
-    const nvS = nv instanceof Date ? nv.toISOString() : nv;
-    if (ovS !== nvS) {
-      diffs.push({
-        field_changed: f,
-        old_value: ovS == null ? null : String(ovS),
-        new_value: nvS == null ? null : String(nvS),
+
+  const changes = [];
+  for (const f of fields) {
+    // only consider fields that the request actually sent
+    if (!Object.prototype.hasOwnProperty.call(data, f)) continue;
+
+    // normalize old & new for stable comparison
+    const oldNorm =
+      f === "due_date"
+        ? (oldT.due_date ? new Date(oldT.due_date).toISOString() : null)
+        : normalizeForCompare(f, oldT[f] ?? null);
+
+    const newNorm = normalizeForCompare(f, data[f]);
+
+    if (newNorm !== oldNorm) {
+      changes.push({
+        field: f,
+        old: oldNorm,
+        val: newNorm,
       });
     }
   }
-  return diffs;
+  return changes;
 }
 
-/* ============ validations ============ */
 
-const createTicketBody = z.object({
-  ticket_type: z.nativeEnum(TicketType),
-  title: z.string().min(1),
-  desc: z.string().min(1),
-  status: z.nativeEnum(TicketStatus).default(TicketStatus.OPEN),
-  priority: z.nativeEnum(TicketPriority).default(TicketPriority.MEDIUM),
-  assigned_to: z.string().uuid().nullable().optional(),
-  parent_id: z.string().uuid().nullable().optional(),
-  due_date: z.coerce.date().nullable().optional(),
-});
+async function writeHistory(
+  tx,
+  workspaceId,
+  ticketId,
+  userId,
+  changes,
+  action = "UPDATE"
+) {
+  if (!changes.length) return;
+  await tx.history.createMany({
+    data: changes.map((c) => ({
+      workspace_id: workspaceId,
+      ticket_id: ticketId,
+      field_changed: c.field,
+      old_value: c.old !== null ? String(c.old) : null,
+      new_value: c.val !== null ? String(c.val) : null,
+      action,
+      changed_by: userId,
+    })),
+  });
+}
 
-const listQuery = z.object({
-  status: z.nativeEnum(TicketStatus).optional(),
-  ticket_type: z.nativeEnum(TicketType).optional(),
-  assignee: z.string().uuid().optional(),
-  parent: z.enum(["root", "child"]).optional(), // root => parent_id null, child => parent_id not null
-  search: z.string().optional(),
-  page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
-  includeSubtasks: z.string().optional(), // "true"/"false"
-  includeComments: z.string().optional(),
-  includeHistory: z.string().optional(),
-});
-
-const updateTicketBody = z.object({
-  title: z.string().min(1).optional(),
-  desc: z.string().min(1).optional(),
-  status: z.nativeEnum(TicketStatus).optional(),
-  priority: z.nativeEnum(TicketPriority).optional(),
-  assigned_to: z.string().uuid().nullable().optional(),
-  parent_id: z.string().uuid().nullable().optional(),
-  due_date: z.coerce.date().nullable().optional(),
-  ticket_type: z.nativeEnum(TicketType).optional(),
-});
-
-/* ============ controllers ============ */
-
-/** 1) POST /workspaces/:wid/tickets  */
-async function createTicket(req, res) {
+// POST /workspaces/:id/tickets
+const createTicket = async (req, res) => {
+  const workspaceId = req.params.id;
+  const userId = req.user.id;
+  await assertUserInWorkspace(userId, workspaceId);
   try {
-    const wid = req.params.wid || req?.ctx?.workspaceId;
-    if (!wid) return httpError(res, 400, "Missing workspace id");
+    const {
+      title,
+      desc,
+      priority,
+      ticket_type,
+      due_date,
+      assigned_to,
+      parent_id,
+      status = "OPEN",
+    } = req.body;
 
-    // validate body
-    const body = createTicketBody.parse(req.body);
+    if (!title || !desc || !priority || !ticket_type) {
+      return res
+        .status(400)
+        .json({ message: "title, desc, priority, ticket_type are required" });
+    }
 
-    const result = await prisma.$transaction(async (tx) => {
-      await ensureAssigneeInWorkspace(tx, {
-        workspace_id: wid,
-        assigned_to: body.assigned_to ?? null,
+    // Validate parent ticket belongs to same workspace
+    if (parent_id) {
+      const parent = await prisma.tickets.findUnique({
+        where: { id: parent_id },
       });
-      await ensureParentInWorkspace(tx, {
-        workspace_id: wid,
-        parent_id: body.parent_id ?? null,
-      });
+      if (!parent || parent.workspace_id !== workspaceId) {
+        return res
+          .status(400)
+          .json({ message: "Invalid parent ticket for this workspace" });
+      }
+    }
 
-      const t = await tx.tickets.create({
+    // Validate assignee is a member of this workspace
+    if (assigned_to) {
+      const member = await prisma.userRole.findFirst({
+        where: { user_id: assigned_to, workspace_id: workspaceId },
+      });
+      if (!member) {
+        return res
+          .status(400)
+          .json({ message: "Assignee is not a member of this workspace" });
+      }
+    }
+
+    const ticket = await prisma.$transaction(async (tx) => {
+      const created = await tx.tickets.create({
         data: {
-          workspace_id: wid,
-          ticket_type: body.ticket_type,
-          title: body.title,
-          desc: body.desc,
-          status: body.status,
-          priority: body.priority,
-          created_by: req.user.id,
-          assigned_to: body.assigned_to ?? req.user.id, // or null if you prefer unassigned
-          parent_id: body.parent_id ?? null,
-          due_date: body.due_date ?? null,
+          workspace_id: workspaceId,
+          ticket_type,
+          title,
+          desc,
+          status,
+          priority,
+          created_by: userId,
+          due_date: due_date ? new Date(due_date) : null,
+          assigned_to: assigned_to || userId, // default to creator if you want
+          parent_id: parent_id || null,
         },
       });
 
-      await auditLogger({
+      // history: creation snapshot
+      await writeHistory(
         tx,
-        workspace_id: wid,
-        ticket_id: t.id,
-        action: "CREATE",
-        changed_by: req.user.id,
-      });
+        workspaceId,
+        created.id,
+        userId,
+        [
+          { field: "title", old: null, val: title },
+          { field: "desc", old: null, val: desc },
+          { field: "status", old: null, val: status },
+          { field: "priority", old: null, val: priority },
+          { field: "assigned_to", old: null, val: assigned_to || userId },
+          { field: "ticket_type", old: null, val: ticket_type },
+          { field: "due_date", old: null, val: due_date || null },
+          { field: "parent_id", old: null, val: parent_id || null },
+        ],
+        "CREATE"
+      );
 
-      return t;
+      return created;
     });
 
-    res.status(201).json(result);
+    res.status(201).json({ message: "Ticket created", ticket });
   } catch (err) {
-    const code = err.status ?? 500;
-    res.status(code).json({ error: err.message || "Internal Server Error" });
+    console.error("createTicket error:", err);
+    res.status(500).json({ message: "Failed to create ticket" });
   }
-}
+};
 
-/** 2) GET /workspaces/:wid/tickets  */
-async function listTickets(req, res) {
+/**
+ * GET /workspaces/:id/tickets?status=&priority=&assignee=&q=&page=1&pageSize=20
+ */
+const listTickets = async (req, res) => {
+  const workspaceId = req.params.id;
+  const { status, priority, assignee, q, page = 1, pageSize = 20 } = req.query;
+
   try {
-    const wid = req.params.wid || req?.ctx?.workspaceId;
-    if (!wid) return httpError(res, 400, "Missing workspace id");
+    // inside listTickets, before querying:
+    await assertUserInWorkspace(req.user.id, workspaceId);
 
-    const q = listQuery.parse(req.query);
+    const where = {
+      workspace_id: workspaceId,
+      ...(status ? { status } : {}),
+      ...(priority ? { priority } : {}),
+      ...(assignee ? { assigned_to: assignee } : {}),
+      ...(q
+        ? {
+            OR: [
+              { title: { contains: String(q), mode: "insensitive" } },
+              { desc: { contains: String(q), mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    };
 
-    const where = { workspace_id: wid };
-    if (q.status) where.status = q.status;
-    if (q.ticket_type) where.ticket_type = q.ticket_type;
-    if (q.assignee) where.assigned_to = q.assignee;
-    if (q.parent === "root") where.parent_id = null;
-    if (q.parent === "child") where.parent_id = { not: null };
-    if (q.search) {
-      where.OR = [
-        { title: { contains: q.search, mode: "insensitive" } },
-        { desc: { contains: q.search, mode: "insensitive" } },
-      ];
-    }
-
-    const skip = (q.page - 1) * q.limit;
-    const take = q.limit;
-
-    const [items, total] = await Promise.all([
+    const [total, items] = await Promise.all([
+      prisma.tickets.count({ where }),
       prisma.tickets.findMany({
         where,
         orderBy: { created_at: "desc" },
-        skip,
-        take,
+        skip: (Number(page) - 1) * Number(pageSize),
+        take: Number(pageSize),
         include: {
-          subtasks: boolQ(q.includeSubtasks),
-          comments: boolQ(q.includeComments)
-            ? { orderBy: { created_at: "desc" } }
-            : false,
-          History: boolQ(q.includeHistory)
-            ? { orderBy: { changed_at: "desc" } }
-            : false,
+          created_by_user: true,
+          updated_by_user: true,
+          assignee: true,
         },
       }),
-      prisma.tickets.count({ where }),
     ]);
 
-    res.json({
-      page: q.page,
-      limit: q.limit,
+    res.status(200).json({
+      page: Number(page),
+      pageSize: Number(pageSize),
       total,
       items,
     });
   } catch (err) {
-    const code = err.status ?? 500;
-    res.status(code).json({ error: err.message || "Internal Server Error" });
+    console.error("listTickets error:", err);
+    res.status(500).json({ message: "Failed to fetch tickets" });
   }
-}
+};
 
-/** 3) GET /workspaces/:wid/tickets/:id */
-async function getTicket(req, res) {
+
+const getSubTasks = async (req, res) => {
+  const { ticketId } = req.params;
   try {
-    const wid = req.params.wid || req?.ctx?.workspaceId;
-    const id = req.params.id;
-    if (!wid || !id) return httpError(res, 400, "Missing ids");
+    const parent = await getTicketAndAssertAccess(ticketId, req.user.id);
 
-    const includeHistory = boolQ(req.query.includeHistory);
-    const includeComments = boolQ(req.query.includeComments);
-    const includeSubtasks = boolQ(req.query.includeSubtasks);
-
-    const t = await prisma.tickets.findFirst({
-      where: { id, workspace_id: wid },
+    const subtasks = await prisma.tickets.findMany({
+      where: { parent_id: ticketId, workspace_id: parent.workspace_id },
       include: {
-        subtasks: includeSubtasks,
-        comments: includeComments ? { orderBy: { created_at: "desc" } } : false,
-        History: includeHistory ? { orderBy: { changed_at: "desc" } } : false,
+        created_by_user: true,
+        updated_by_user: true,
+        assignee: true,
       },
     });
-
-    if (!t) return httpError(res, 404, "Ticket not found");
-    res.json(t);
+    res.status(200).json(subtasks);
   } catch (err) {
-    const code = err.status ?? 500;
-    res.status(code).json({ error: err.message || "Internal Server Error" });
+    console.error("getSubTasks error:", err);
+    res.status(500).json({ message: "Failed to fetch subtasks" });
   }
-}
+};
 
-/** ownership helper for update/delete/close (owner or assignee allowed) */
-async function isTicketOwnerOrAssignee(
-  tx,
-  { ticket_id, user_id, workspace_id }
-) {
-  const t = await tx.tickets.findFirst({
-    where: { id: ticket_id, workspace_id },
-    select: { created_by: true, assigned_to: true },
-  });
-  if (!t) return false;
-  return t.created_by === user_id || t.assigned_to === user_id;
-}
-
-/** 4) PUT /workspaces/:wid/tickets/:id */
-async function updateTicket(req, res) {
+/**
+ * GET /tickets/:ticketId
+ */
+const getTicketById = async (req, res) => {
+  const { ticketId } = req.params;
   try {
-    const wid = req.params.wid || req?.ctx?.workspaceId;
-    const id = req.params.id;
-    if (!wid || !id) return httpError(res, 400, "Missing ids");
+    const ticket = await prisma.tickets.findUnique({
+      where: { id: ticketId },
+      include: {
+        created_by_user: true,
+        updated_by_user: true,
+        assignee: true,
+        comments: true,
+        History: true,
+      },
+    });
+    if (!ticket) return res.status(404).json({ message: "Ticket not found" });
 
-    const patch = updateTicketBody.parse(req.body);
+    await assertUserInWorkspace(req.user.id, ticket.workspace_id); // ⬅️ add this
 
-    const result = await prisma.$transaction(async (tx) => {
-      const before = await tx.tickets.findFirst({
-        where: { id, workspace_id: wid },
+    res.status(200).json(ticket);
+  } catch (err) {
+    console.error("getTicketById error:", err);
+    res.status(err.status ?? 500).json({ message: err.message || "Failed to fetch ticket" });
+  }
+};
+
+
+/**
+ * PATCH /tickets/:ticketId
+ * Body: partial fields: { title?, desc?, status?, priority?, due_date?, assigned_to?, parent_id?, type? }
+ */
+const updateTicket = async (req, res) => {
+  const { ticketId } = req.params;
+  const userId = req.user.id;
+  try {
+    const current = await getTicketAndAssertAccess(ticketId, userId);
+
+    // validations using current.workspace_id (unchanged)
+    if (req.body.parent_id) {
+      const parent = await prisma.tickets.findUnique({ where: { id: req.body.parent_id } });
+      if (!parent || parent.workspace_id !== current.workspace_id) {
+        return res.status(400).json({ message: "Invalid parent ticket for this workspace" });
+      }
+    }
+    if (req.body.assigned_to) {
+      const member = await prisma.userRole.findFirst({
+        where: { user_id: req.body.assigned_to, workspace_id: current.workspace_id },
       });
-      if (!before)
-        throw Object.assign(new Error("Ticket not found"), { status: 404 });
+      if (!member) return res.status(400).json({ message: "Assignee is not a member of this workspace" });
+    }
 
-      // ownership shortcut (if your authorize middleware provides allowOwner via opts;
-      // if not, we enforce owner/assignee rule here in addition to ROLE:UPDATE)
-      const isOwnerOrAssignee = await isTicketOwnerOrAssignee(tx, {
-        ticket_id: id,
-        user_id: req.user.id,
-        workspace_id: wid,
-      });
-      // If you want to enforce only via RBAC, remove this check.
-      if (
-        !req?.ctx?.perms?.has(`TICKET:${Operation.MANAGE}`) &&
-        !isOwnerOrAssignee
-      ) {
-        throw Object.assign(new Error("Forbidden: not owner/assignee"), {
-          status: 403,
-        });
-      }
+    // ⬇️ ONLY allow columns that exist on Tickets
+    const allowed = new Set([
+      "title",
+      "desc",
+      "status",
+      "priority",
+      "assigned_to",
+      "due_date",
+      "parent_id",
+      "ticket_type",
+    ]);
 
-      // validations
-      if (patch.assigned_to) {
-        await ensureAssigneeInWorkspace(tx, {
-          workspace_id: wid,
-          assigned_to: patch.assigned_to,
-        });
+    const updateData = {};
+    for (const k of Object.keys(req.body || {})) {
+      if (!allowed.has(k)) continue;
+      if (k === "due_date") {
+        updateData.due_date = req.body.due_date ? new Date(req.body.due_date) : null;
+      } else {
+        updateData[k] = req.body[k];
       }
-      if ("parent_id" in patch) {
-        await ensureParentInWorkspace(tx, {
-          workspace_id: wid,
-          parent_id: patch.parent_id ?? null,
-        });
-        if (patch.parent_id === id) {
-          throw Object.assign(new Error("Ticket cannot be its own parent"), {
-            status: 422,
-          });
-        }
-      }
+    }
 
-      const updated = await tx.tickets.update({
-        where: { id },
+    // compute precise diff ONLY on fields we will actually write
+    const changes = diffTicket(current, updateData);
+    if (!changes.length) {
+      return res.status(200).json({ message: "No changes", ticket: current });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const t = await tx.tickets.update({
+        where: { id: ticketId },
         data: {
-          title: patch.title ?? before.title,
-          desc: patch.desc ?? before.desc,
-          status: patch.status ?? before.status,
-          priority: patch.priority ?? before.priority,
-          assigned_to:
-            patch.assigned_to === undefined
-              ? before.assigned_to
-              : patch.assigned_to,
-          parent_id:
-            patch.parent_id === undefined ? before.parent_id : patch.parent_id,
-          due_date:
-            patch.due_date === undefined ? before.due_date : patch.due_date,
-          ticket_type: patch.ticket_type ?? before.ticket_type,
-          updated_by: req.user.id,
+          ...updateData,
+          updated_by: userId,
         },
       });
 
-      const diffs = computeTicketDiffs(before, updated);
-      for (const d of diffs) {
-        await auditLogger({
-          tx,
-          workspace_id: wid,
-          ticket_id: id,
-          action: "UPDATE",
-          field_changed: d.field_changed,
-          old_value: d.old_value,
-          new_value: d.new_value,
-          changed_by: req.user.id,
-        });
-      }
-
-      return updated;
+      await writeHistory(tx, t.workspace_id, t.id, userId, changes, "UPDATE");
+      return t;
     });
 
-    res.json(result);
+    res.status(200).json({ message: "Ticket updated", ticket: updated });
   } catch (err) {
-    const code = err.status ?? 500;
-    res.status(code).json({ error: err.message || "Internal Server Error" });
+    console.error("updateTicket error:", err);
+    res.status(err.status ?? 500).json({ message: err.message || "Failed to update ticket" });
   }
-}
+};
 
-/** 5) POST /workspaces/:wid/tickets/:id/close */
-async function closeTicket(req, res) {
+
+
+/**
+ * DELETE /tickets/:ticketId
+ * - Also deletes subtasks (ON CASCADE handled by app here)
+ */
+const deleteTicket = async (req, res) => {
+  const { ticketId } = req.params;
+  const userId = req.user.id;
   try {
-    const wid = req.params.wid || req?.ctx?.workspaceId;
-    const id = req.params.id;
-    if (!wid || !id) return httpError(res, 400, "Missing ids");
-
-    const ticket = await prisma.tickets.findFirst({
-      where: { id, workspace_id: wid },
-    });
-    if (!ticket) return httpError(res, 404, "Ticket not found");
-
-    // Optional: enforce owner/assignee or MANAGE
-    const allowed =
-      req?.ctx?.perms?.has(`TICKET:${Operation.MANAGE}`) ||
-      (await isTicketOwnerOrAssignee(prisma, {
-        ticket_id: id,
-        user_id: req.user.id,
-        workspace_id: wid,
-      }));
-    if (!allowed) return httpError(res, 403, "Forbidden: not owner/assignee");
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const u = await tx.tickets.update({
-        where: { id },
-        data: { status: TicketStatus.CLOSED, updated_by: req.user.id },
-      });
-
-      await auditLogger({
-        tx,
-        workspace_id: wid,
-        ticket_id: id,
-        action: "CLOSE",
-        changed_by: req.user.id,
-      });
-
-      return u;
-    });
-
-    res.json(updated);
-  } catch (err) {
-    const code = err.status ?? 500;
-    res.status(code).json({ error: err.message || "Internal Server Error" });
-  }
-}
-
-/** 6) DELETE /workspaces/:wid/tickets/:id */
-async function deleteTicket(req, res) {
-  try {
-    const wid = req.params.wid || req?.ctx?.workspaceId;
-    const id = req.params.id;
-    if (!wid || !id) return httpError(res, 400, "Missing ids");
-
-    // Optional: enforce owner/assignee or MANAGE
-    const allowed =
-      req?.ctx?.perms?.has(`TICKET:${Operation.MANAGE}`) ||
-      (await isTicketOwnerOrAssignee(prisma, {
-        ticket_id: id,
-        user_id: req.user.id,
-        workspace_id: wid,
-      }));
-    if (!allowed) return httpError(res, 403, "Forbidden: not owner/assignee");
+    const current = await getTicketAndAssertAccess(ticketId, userId); // ⬅️ replace your current fetch
 
     await prisma.$transaction(async (tx) => {
-      // hard delete; if you want soft delete add a boolean field instead
-      await tx.comments.deleteMany({
-        where: { ticket_id: id, workspace_id: wid },
-      });
-      await tx.history.deleteMany({
-        where: { ticket_id: id, workspace_id: wid },
-      });
-      await tx.tickets.delete({ where: { id } });
-
-      await auditLogger({
+      await writeHistory(
         tx,
-        workspace_id: wid,
-        ticket_id: id,
-        action: "DELETE",
-        changed_by: req.user.id,
-      });
+        current.workspace_id,
+        current.id,
+        userId,
+        [{ field: "deleted", old: "false", val: "true" }],
+        "DELETE"
+      );
+      await tx.comments.deleteMany({ where: { ticket_id: ticketId } });
+      await tx.tickets.deleteMany({ where: { parent_id: ticketId } });
+      await tx.tickets.delete({ where: { id: ticketId } });
     });
 
-    res.status(204).send();
+    res.status(200).json({ message: "Ticket deleted" });
   } catch (err) {
-    const code = err.status ?? 500;
-    res.status(code).json({ error: err.message || "Internal Server Error" });
+    console.error("deleteTicket error:", err);
+    res.status(err.status ?? 500).json({ message: err.message || "Failed to delete ticket" });
   }
-}
+};
+
 
 module.exports = {
   createTicket,
   listTickets,
-  getTicket,
+  getTicketById,
   updateTicket,
-  closeTicket,
   deleteTicket,
+  getSubTasks,
 };

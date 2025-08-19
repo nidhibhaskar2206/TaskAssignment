@@ -22,11 +22,6 @@ const hasPerm = (req, entity, op) =>
 
 /* ------------------------- validation ------------------------- */
 
-const assignPairsBody = z.object({
-  usernames: z.array(z.string().min(1)).nonempty(),
-  role_names: z.array(z.string().min(1)).nonempty(),
-});
-
 const createRoleBody = z.object({
   name: z.string().min(2),
   desc: z.string().optional(),
