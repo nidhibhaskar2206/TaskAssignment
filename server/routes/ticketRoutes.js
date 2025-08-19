@@ -4,7 +4,7 @@ const { workspaceContext } = require("../middlewares/workspaceContext");
 const {
   loadUserRoleInWorkspace,
 } = require("../middlewares/loadUserRoleInWorkspace");
-const { authorize } = require("../middlewares/authorize"); // your RBAC guard
+const { authorize } = require("../middlewares/authorize"); 
 const {
   createTicket,
   listTickets,
@@ -13,7 +13,6 @@ const {
   closeTicket,
   deleteTicket,
 } = require("../controllers/ticketController");
-const { Operation } = require("../constants"); // Adjust path as needed
 
 // POST /tickets/:wid/tickets
 router.post(
@@ -21,7 +20,7 @@ router.post(
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("TICKET", Operation.CREATE),
+  authorize("TICKET", "CREATE"),
   // validateSubtaskConstraint, inputGuard  // optional if you keep them
   createTicket
 );
@@ -32,7 +31,7 @@ router.get(
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("TICKET", Operation.READ),
+  authorize("TICKET", "READ"),
   listTickets
 );
 
@@ -42,7 +41,7 @@ router.get(
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("TICKET", Operation.READ),
+  authorize("TICKET", "READ"),
   getTicket
 );
 
@@ -52,7 +51,7 @@ router.put(
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("TICKET", Operation.UPDATE), // your authorize can support allowOwner via opts
+  authorize("TICKET", "UPDATE"), // your authorize can support allowOwner via opts
   updateTicket
 );
 
@@ -62,7 +61,7 @@ router.post(
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("TICKET", Operation.UPDATE), // or MANAGE depending on your policy
+  authorize("TICKET", "UPDATE"), // or MANAGE depending on your policy
   closeTicket
 );
 
@@ -72,7 +71,7 @@ router.delete(
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("TICKET", Operation.DELETE),
+  authorize("TICKET", "DELETE"),
   deleteTicket
 );
 

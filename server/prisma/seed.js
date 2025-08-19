@@ -4,8 +4,8 @@ const prisma = new PrismaClient();
 
 async function main() {
   // Permissions data
-  const entities = ["Tickets", "Comments", "Role", "UserRole"];
-  const operations = ["CREATE", "READ", "UPDATE", "DELETE", "COMMENT"];
+  const entities = ["TICKET", "COMMENT", "ROLE", "USER_ROLE", "ROLE_PERMISSION", "USER", "HISTORY"];
+  const operations = ["CREATE", "READ", "UPDATE", "DELETE"];
 
   for (const entity of entities) {
     for (const operation of operations) {
@@ -44,10 +44,10 @@ async function main() {
     console.log("ℹ️ SUPER_ADMIN user already exists.");
   }
 
-  // 10 Normal Users
+  // 3 Normal Users
   // prisma/seed.js (fixed users loop)
   const hashedUserPassword = await bcrypt.hash("User@1234", 10);
-  const userData = Array.from({ length: 10 }, (_, i) => ({
+  const userData = Array.from({ length: 3 }, (_, i) => ({
     name: `User ${i + 1}`,
     email: `user${i + 1}@example.com`,
     password: hashedUserPassword,
@@ -64,7 +64,7 @@ async function main() {
     });
   }
 
-  console.log("✅ 10 normal users seeded successfully.");
+  console.log("✅ 3 normal users seeded successfully.");
 }
 
 main()

@@ -5,10 +5,12 @@ const {
   loadUserRoleInWorkspace,
 } = require("../middlewares/loadUserRoleInWorkspace");
 const { authorize } = require("../middlewares/authorize");
-const { Operation } = require("../constants");
+
 const {
   createWorkspace,
-  assignUsersToWorkspace,
+  assignRolestoUsers,
+  getUserWorkspaces,
+  getWorkspaceById,
   listRoles,
   createRole,
   updateRole,
@@ -21,7 +23,7 @@ const router = express.Router();
 router.post(
   "/workspaces",
   authenticate,
-  authorize("WORKSPACE", Operation.CREATE), // Only SUPER_ADMIN or those with permission
+  authorize("WORKSPACE", "CREATE"),
   createWorkspace
 );
 
@@ -30,8 +32,8 @@ router.post(
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("USERROLE", Operation.CREATE),
-  assignUsersToWorkspace
+  authorize("USER_ROLE", "CREATE"),
+  assignRolestoUsers
 );
 
 router.get(
@@ -39,16 +41,20 @@ router.get(
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("ROLE", Operation.READ),
+  authorize("ROLE", "READ"),
   listRoles
 );
+
+router.get("/all-workspaces", authenticate, getUserWorkspaces);
+
+router.get("/workspaces/:wid", authenticate, getWorkspaceById);
 
 router.post(
   "/workspaces/:wid/roles",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("ROLE", Operation.CREATE),
+  authorize("ROLE", "CREATE"),
   createRole
 );
 
@@ -57,7 +63,7 @@ router.put(
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("ROLE", Operation.UPDATE),
+  authorize("ROLE", "UPDATE"),
   updateRole
 );
 
@@ -66,7 +72,7 @@ router.delete(
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("ROLE", Operation.DELETE),
+  authorize("ROLE", "DELETE"),
   deleteRole
 );
 
@@ -75,7 +81,7 @@ router.post(
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
-  authorize("USERROLE", Operation.CREATE),
+  authorize("USER_ROLE", "CREATE"),
   addUsersToRole
 );
 

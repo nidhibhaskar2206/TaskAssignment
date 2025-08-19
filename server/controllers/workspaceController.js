@@ -1,6 +1,6 @@
 // workspace.controller.js
-const { PrismaClient, Operation } = require('@prisma/client');
-const { z } = require('zod');
+const { PrismaClient } = require("@prisma/client");
+const { z } = require("zod");
 
 const prisma = new PrismaClient();
 
@@ -22,20 +22,9 @@ const hasPerm = (req, entity, op) =>
 
 /* ------------------------- validation ------------------------- */
 
-
 const assignPairsBody = z.object({
   usernames: z.array(z.string().min(1)).nonempty(),
   role_names: z.array(z.string().min(1)).nonempty(),
-});
-
-const createWorkspaceBody = z.object({
-  name: z.string().min(2),
-  admin_id: z.string().uuid(),
-});
-
-const inviteBody = z.object({
-  email: z.string().email(),
-  role_ids: z.array(z.string().uuid()).nonempty(),
 });
 
 const createRoleBody = z.object({
@@ -45,23 +34,10 @@ const createRoleBody = z.object({
     .array(
       z.object({
         entity: z.string().min(1),
-        operation: z.nativeEnum(Operation),
+        operation: z.string(),
       })
     )
     .nonempty(),
-});
-
-const updateRoleBody = z.object({
-  name: z.string().min(2).optional(),
-  desc: z.string().optional(),
-  permissions: z
-    .array(
-      z.object({
-        entity: z.string().min(1),
-        operation: z.nativeEnum(Operation),
-      })
-    )
-    .optional(),
 });
 
 const usersToRoleBody = z.object({
@@ -92,71 +68,31 @@ const DEFAULT_ROLES = [
   {
     name: "Admin",
     permissions: [
-      { entity: "ROLE", operation: Operation.CREATE },
-      { entity: "ROLE", operation: Operation.READ },
-      { entity: "ROLE", operation: Operation.UPDATE },
-      { entity: "ROLE", operation: Operation.DELETE },
-      { entity: "USER", operation: Operation.CREATE },
-      { entity: "USER", operation: Operation.READ },
-      { entity: "USERROLE", operation: Operation.CREATE },
-      { entity: "TICKET", operation: Operation.CREATE },
-      { entity: "TICKET", operation: Operation.READ },
-      { entity: "TICKET", operation: Operation.UPDATE },
-      { entity: "TICKET", operation: Operation.DELETE },
-      { entity: "COMMENT", operation: Operation.CREATE },
-      { entity: "COMMENT", operation: Operation.READ },
-      { entity: "COMMENT", operation: Operation.DELETE },
-      { entity: "HISTORY", operation: Operation.READ },
-      { entity: "TICKET", operation: Operation.MANAGE },
-    ],
-  },
-  {
-    name: "Designer",
-    permissions: [
-      { entity: "TICKET", operation: Operation.CREATE },
-      { entity: "TICKET", operation: Operation.READ },
-      { entity: "TICKET", operation: Operation.UPDATE },
-      { entity: "COMMENT", operation: Operation.CREATE },
-      { entity: "COMMENT", operation: Operation.READ },
-    ],
-  },
-  {
-    name: "Developer",
-    permissions: [
-      { entity: "TICKET", operation: Operation.CREATE },
-      { entity: "TICKET", operation: Operation.READ },
-      { entity: "TICKET", operation: Operation.UPDATE },
-      { entity: "COMMENT", operation: Operation.CREATE },
-      { entity: "COMMENT", operation: Operation.READ },
-    ],
-  },
-  {
-    name: "DevOps",
-    permissions: [
-      { entity: "TICKET", operation: Operation.CREATE },
-      { entity: "TICKET", operation: Operation.READ },
-      { entity: "TICKET", operation: Operation.UPDATE },
-      { entity: "COMMENT", operation: Operation.CREATE },
-      { entity: "COMMENT", operation: Operation.READ },
-    ],
-  },
-  {
-    name: "Lead",
-    permissions: [
-      { entity: "TICKET", operation: Operation.CREATE },
-      { entity: "TICKET", operation: Operation.READ },
-      { entity: "TICKET", operation: Operation.UPDATE },
-      { entity: "TICKET", operation: Operation.DELETE },
-      { entity: "COMMENT", operation: Operation.CREATE },
-      { entity: "COMMENT", operation: Operation.READ },
-    ],
-  },
-  {
-    name: "Reviewer",
-    permissions: [
-      { entity: "TICKET", operation: Operation.READ },
-      { entity: "COMMENT", operation: Operation.CREATE },
-      { entity: "COMMENT", operation: Operation.READ },
+      { entity: "ROLE", operation: "CREATE" },
+      { entity: "ROLE", operation: "READ" },
+      { entity: "ROLE", operation: "UPDATE" },
+      { entity: "ROLE", operation: "DELETE" },
+      { entity: "USER", operation: "CREATE" },
+      { entity: "USER", operation: "READ" },
+      { entity: "USER", operation: "UPDATE" },
+      { entity: "USER", operation: "DELETE" },
+      { entity: "USER_ROLE", operation: "CREATE" },
+      { entity: "USER_ROLE", operation: "READ" },
+      { entity: "USER_ROLE", operation: "UPDATE" },
+      { entity: "USER_ROLE", operation: "DELETE" },
+      { entity: "ROLE_PERMISSION", operation: "CREATE" },
+      { entity: "ROLE_PERMISSION", operation: "READ" },
+      { entity: "ROLE_PERMISSION", operation: "UPDATE" },
+      { entity: "ROLE_PERMISSION", operation: "DELETE" },
+      { entity: "TICKET", operation: "CREATE" },
+      { entity: "TICKET", operation: "READ" },
+      { entity: "TICKET", operation: "UPDATE" },
+      { entity: "TICKET", operation: "DELETE" },
+      { entity: "COMMENT", operation: "CREATE" },
+      { entity: "COMMENT", operation: "READ" },
+      { entity: "COMMENT", operation: "UPDATE" },
+      { entity: "COMMENT", operation: "DELETE" },
+      { entity: "HISTORY", operation: "READ" },
     ],
   },
 ];
@@ -167,15 +103,27 @@ const DEFAULT_ROLES = [
 async function createWorkspace(req, res) {
   try {
     requireSuperAdmin(req);
-    const body = createWorkspaceBody.parse(req.body);
+    const body = req.body;
+
+    if (!body.name || !body.admin_id) {
+      return httpError(res, 400, "All fields are required");
+    }
+
+    const existingWorkspace = await prisma.workspace.findFirst({
+      where: { name: { equals: body.name, mode: "insensitive" } },
+    });
+
+    if (existingWorkspace) {
+      return httpError(res, 409, "Workspace with this name already exists");
+    }
 
     const admin = await prisma.users.findUnique({
       where: { id: body.admin_id },
     });
+
     if (!admin) return httpError(res, 404, "Admin user not found");
 
     const ws = await prisma.$transaction(async (tx) => {
-    
       const workspace = await tx.workspace.create({
         data: {
           name: body.name,
@@ -185,12 +133,12 @@ async function createWorkspace(req, res) {
       });
 
       const roles = await Promise.all(
-        DEFAULT_ROLES.map((r) =>
+        DEFAULT_ROLES.map((role) =>
           tx.role.create({
             data: {
               workspace_id: workspace.id,
-              name: r.name,
-              desc: r.desc ?? null,
+              name: role.name,
+              desc: role.desc ?? null,
             },
           })
         )
@@ -224,101 +172,92 @@ async function createWorkspace(req, res) {
 }
 
 // POST /workspaces/:wid/assign
-async function assignUsersToWorkspace(req, res) {
+async function assignRolestoUsers(req, res) {
+  const workspaceId = req.params.id;
+  const { users = [], roles = [] } = req.body;
+
+  // Basic validation
+  if (
+    !Array.isArray(users) ||
+    !Array.isArray(roles) ||
+    users.length !== roles.length ||
+    users.length === 0
+  ) {
+    return res.status(400).json({
+      message: "Provide non-empty 'users' and 'roles' arrays of equal length",
+    });
+  }
+
+  if (!hasPerm(req, "USER_ROLE", "CREATE"))
+    return httpError(res, 403, "Access Denied : USER_ROLE:CREATE required");
+
   try {
-    const wid = req.params.wid || req?.ctx?.workspaceId;
-    if (!wid) return res.status(400).json({ error: "Missing workspace id" });
-
-    if (
-      !req?.ctx?.isSuperAdmin &&
-      !req?.ctx?.perms?.has(`USERROLE:${Operation.CREATE}`)
-    ) {
-      return res
-        .status(403)
-        .json({ error: "Forbidden: USERROLE:CREATE required" });
-    }
-
-    const { usernames, role_names } = assignPairsBody.parse(req.body);
-
-    if (usernames.length !== role_names.length) {
-      return res.status(400).json({
-        error:
-          "usernames and role_names must have the same length (pairwise assignment)",
+    // 1) Validate roles belong to the workspace
+    const roleIds = [...new Set(roles)];
+    const wsRoles = await prisma.role.findMany({
+      where: { id: { in: roleIds }, workspace_id: workspaceId },
+      select: { id: true },
+    });
+    const validRoleIdSet = new Set(wsRoles.map((r) => r.id));
+    const invalidRoleIds = roleIds.filter((rid) => !validRoleIdSet.has(rid));
+    if (invalidRoleIds.length) {
+      return res.status(404).json({
+        message: "Some roles do not belong to this workspace",
+        invalidRoleIds,
       });
     }
 
-    // Fetch roles for this workspace
-    const roles = await prisma.role.findMany({
-      where: {
-        workspace_id: wid,
-        name: { in: role_names, mode: "insensitive" },
-      },
-      select: { id: true, name: true },
+    // 2) Validate users exist
+    const userIds = [...new Set(users)];
+    const foundUsers = await prisma.users.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true },
     });
-    const roleByLowerName = new Map(
-      roles.map((r) => [r.name.toLowerCase(), r])
-    );
-
-    const missingRoles = role_names.filter(
-      (n) => !roleByLowerName.has(n.toLowerCase())
-    );
-    if (missingRoles.length) {
-      return res.status(422).json({
-        error: "One or more roles do not belong to this workspace",
-        details: { missing_roles: missingRoles },
-      });
-    }
-
-    // Fetch users by name
-    const users = await prisma.users.findMany({
-      where: { name: { in: usernames, mode: "insensitive" } },
-      select: { id: true, name: true, is_active: true, is_verified: true },
-    });
-    const userByLowerName = new Map(
-      users.map((u) => [u.name.toLowerCase(), u])
-    );
-
-    const missingUsers = usernames.filter(
-      (n) => !userByLowerName.has(n.toLowerCase())
-    );
+    const foundUserIdSet = new Set(foundUsers.map((u) => u.id));
+    const missingUsers = userIds.filter((uid) => !foundUserIdSet.has(uid));
     if (missingUsers.length) {
       return res.status(404).json({
-        error: "One or more users not found",
-        details: { missing_users: missingUsers },
+        message: "Some users were not found",
+        missingUsers,
       });
     }
 
-    const inactive = usernames
-      .map((n) => userByLowerName.get(n.toLowerCase()))
-      .filter((u) => !u.is_active || !u.is_verified)
-      .map((u) => u.name);
-    if (inactive.length) {
-      return res.status(422).json({
-        error: "Users must be active & verified",
-        details: { inactive_users: inactive },
-      });
-    }
+    // 3) Upsert each (user, workspace) with the given role
+    const ops = users.map((userId, i) =>
+      prisma.userRole.upsert({
+        where: {
+          user_id_workspace_id: { user_id: userId, workspace_id: workspaceId },
+        },
+        update: { role_id: roles[i] },
+        create: {
+          user_id: userId,
+          workspace_id: workspaceId,
+          role_id: roles[i],
+        },
+      })
+    );
 
-    // ✅ Pairwise mapping
-    const rows = usernames.map((uname, i) => {
-      const u = userByLowerName.get(uname.toLowerCase());
-      const r = roleByLowerName.get(role_names[i].toLowerCase());
-      return { user_id: u.id, role_id: r.id, workspace_id: wid };
+    const results = await prisma.$transaction(ops);
+
+    // Optional: return enriched view
+    const enriched = await prisma.userRole.findMany({
+      where: { workspace_id: workspaceId, user_id: { in: userIds } },
+      include: {
+        role: true,
+        user: true,
+      },
     });
 
-    await prisma.userRole.createMany({ data: rows, skipDuplicates: true });
-
-    return res.status(200).json({
-      assigned: rows.length,
-      pairs: usernames.map((u, i) => ({ user: u, role: role_names[i] })),
+    res.status(200).json({
+      message: "Roles assigned",
+      count: results.length,
+      assignments: enriched,
     });
   } catch (err) {
-    const code = err.status ?? 500;
-    res.status(code).json({ error: err.message || "Internal Server Error" });
+    console.error("bulkAssignRolesToUsers error:", err);
+    res.status(500).json({ message: "Failed to assign roles in bulk" });
   }
 }
-
-
 
 // GET /workspaces/:wid/roles
 async function listRoles(req, res) {
@@ -326,21 +265,17 @@ async function listRoles(req, res) {
     const wid = req.params.wid || req?.ctx?.workspaceId;
     if (!wid) return httpError(res, 400, "Missing workspace id");
     if (!hasPerm(req, "ROLE", Operation.READ))
-      return httpError(res, 403, "Forbidden: ROLE:READ required");
-
+      return httpError(res, 403, "Access Denied: ROLE:READ required");
     const roles = await prisma.role.findMany({
       where: { workspace_id: wid },
       include: { permissions: { include: { permission: true } } },
       orderBy: { name: "asc" },
     });
-
     res.json(
       roles.map((r) => ({
-        id: r.id,
         name: r.name,
         desc: r.desc,
         permissions: r.permissions.map((p) => ({
-          id: p.permission_id,
           entity: p.permission.entity,
           operation: p.permission.operation,
         })),
@@ -349,6 +284,49 @@ async function listRoles(req, res) {
   } catch (err) {
     const code = err.status ?? 500;
     res.status(code).json({ error: err.message || "Internal Server Error" });
+  }
+}
+
+async function getUserWorkspaces(req, res) {
+  try {
+    const workspaces = await prisma.workspace.findMany({
+      where: {
+        users: {
+          some: {
+            user_id: req.user.id,
+          },
+        },
+      },
+      include: { admin: true },
+    });
+    res.status(200).json(workspaces);
+  } catch (error) {
+    const code = error.status ?? 500;
+    res.status(code).json({ error: error.message || "Internal Server Error" });
+  }
+}
+
+async function getWorkspaceById(req, res) {
+  try {
+    const { workspaceId } = req.params;
+
+    if (!workspaceId) {
+      return res.status(400).json({ message: "Workspace ID is required" });
+    }
+
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      include: { admin: true, users: true, roles: true },
+    });
+
+    if (!workspace) {
+      return res.status(404).json({ message: "Workspace not found" });
+    }
+
+    res.status(200).json(workspace);
+  } catch (error) {
+    console.error("Get Workspace By ID Error:", error);
+    res.status(500).json({ message: "Failed to fetch workspace" });
   }
 }
 
@@ -388,23 +366,20 @@ async function createRole(req, res) {
 async function updateRole(req, res) {
   try {
     const wid = req.params.wid || req?.ctx?.workspaceId;
-    const roleName = req.params.roleName; // changed param
-    if (!wid || !roleName)
-      return httpError(res, 400, "Missing workspace id or role name");
 
-    if (!hasPerm(req, "ROLE", Operation.UPDATE)) {
-      return httpError(res, 403, "Forbidden: ROLE:UPDATE required");
+    const roleId = req.params.roleId;
+
+    if (!wid || !roleId) return httpError(res, 400, "Missing workspace id");
+
+    if (!hasPerm(req, "ROLE", "UPDATE")) {
+      return httpError(res, 403, "Access denied: ROLE:UPDATE required");
     }
 
-    const patch = updateRoleBody.parse(req.body);
+    const body = req.body;
 
     const updated = await prisma.$transaction(async (tx) => {
-      // find role by name & workspace
       const role = await tx.role.findFirst({
-        where: {
-          name: { equals: roleName, mode: "insensitive" }, // case-insensitive match
-          workspace_id: wid,
-        },
+        where: { id: roleId, workspace_id: wid },
       });
 
       if (!role) {
@@ -414,30 +389,35 @@ async function updateRole(req, res) {
       const r2 = await tx.role.update({
         where: { id: role.id },
         data: {
-          name: patch.name ?? role.name,
-          desc: patch.desc ?? role.desc,
+          name: body.name || role.name,
+          desc: body.desc || role.desc,
         },
       });
 
-      if (patch.permissions) {
+      // Removing all permissions
+      if (Array.isArray(body.permissions)) {
         const permRows = await Promise.all(
-          patch.permissions.map((p) =>
+          body.permissions.map((p) =>
             ensurePermission(p.entity, p.operation, tx)
           )
         );
-        await tx.rolePermission.deleteMany({ where: { role_id: role.id } });
-        await tx.rolePermission.createMany({
-          data: permRows.map((p) => ({
-            role_id: role.id,
-            permission_id: p.id,
-          })),
-        });
-      }
 
+        await tx.rolePermission.deleteMany({ where: { role_id: role.id } });
+
+        if (permRows.length) {
+          await tx.rolePermission.createMany({
+            data: permRows.map((p) => ({
+              role_id: role.id,
+              permission_id: p.id,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
       return r2;
     });
 
-    res.json(updated);
+    res.status(200).json(updated);
   } catch (err) {
     if (err.code === "P2002") {
       return httpError(res, 409, "Role name already exists in this workspace");
@@ -454,7 +434,7 @@ async function deleteRole(req, res) {
     const roleId = req.params.roleId;
     if (!wid || !roleId) return httpError(res, 400, "Missing ids");
     if (!hasPerm(req, "ROLE", Operation.DELETE))
-      return httpError(res, 403, "Forbidden: ROLE:DELETE required");
+      return httpError(res, 403, "Access Denied: ROLE:DELETE required");
 
     const inUse = await prisma.userRole.findFirst({
       where: { role_id: roleId, workspace_id: wid },
@@ -491,7 +471,7 @@ async function addUsersToRole(req, res) {
     const roleId = req.params.roleId;
     if (!wid || !roleId) return httpError(res, 400, "Missing ids");
     if (!hasPerm(req, "USERROLE", Operation.CREATE))
-      return httpError(res, 403, "Forbidden: USERROLE:CREATE required");
+      return httpError(res, 403, "Access Denied : USER_ROLE:CREATE required");
 
     const { user_ids } = usersToRoleBody.parse(req.body);
 
@@ -524,25 +504,13 @@ async function addUsersToRole(req, res) {
 }
 
 module.exports = {
-    createWorkspace,
-    assignUsersToWorkspace,
-    listRoles,
-    createRole,
-    updateRole,
-    deleteRole,
-    addUsersToRole,
-}
-
-/* ------------------------- example bindings (for reference)
-import { Router } from 'express';
-const router = Router();
-
-router.post('/workspaces', authenticate, createWorkspace);
-router.post('/workspaces/:wid/invite', authenticate, workspaceContext, loadUserRoleInWorkspace, inviteUser);
-router.get('/workspaces/:wid/roles', authenticate, workspaceContext, loadUserRoleInWorkspace, listRoles);
-router.post('/workspaces/:wid/roles', authenticate, workspaceContext, loadUserRoleInWorkspace, createRole);
-router.put('/workspaces/:wid/roles/:roleId', authenticate, workspaceContext, loadUserRoleInWorkspace, updateRole);
-router.delete('/workspaces/:wid/roles/:roleId', authenticate, workspaceContext, loadUserRoleInWorkspace, deleteRole);
-router.post('/workspaces/:wid/roles/:roleId/users', authenticate, workspaceContext, loadUserRoleInWorkspace, addUsersToRole);
-export default router;
------------------------------------------------------------------ */
+  createWorkspace,
+  assignRolestoUsers,
+  getUserWorkspaces,
+  getWorkspaceById,
+  listRoles,
+  createRole,
+  updateRole,
+  deleteRole,
+  addUsersToRole,
+};
