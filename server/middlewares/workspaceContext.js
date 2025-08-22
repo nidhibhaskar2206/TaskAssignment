@@ -2,7 +2,12 @@ const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
 async function workspaceContext(req, res, next) {
-  const wid = req.params.wid || req.body.workspace_id;
+  let wid =
+      req.params?.wid ??
+      req.params?.id ??
+      req.query?.wid ??
+      req.body?.workspace_id;
+      
   if (!wid) {
     return res.status(400).json({ message: "Workspace ID is required" });
   }

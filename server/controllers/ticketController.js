@@ -61,7 +61,9 @@ function diffTicket(oldT, data) {
     // normalize old & new for stable comparison
     const oldNorm =
       f === "due_date"
-        ? (oldT.due_date ? new Date(oldT.due_date).toISOString() : null)
+        ? oldT.due_date
+          ? new Date(oldT.due_date).toISOString()
+          : null
         : normalizeForCompare(f, oldT[f] ?? null);
 
     const newNorm = normalizeForCompare(f, data[f]);
@@ -76,7 +78,6 @@ function diffTicket(oldT, data) {
   }
   return changes;
 }
-
 
 async function writeHistory(
   tx,
@@ -100,12 +101,17 @@ async function writeHistory(
   });
 }
 
-// POST /workspaces/:id/tickets
+// POST /:wid/tickets
 const createTicket = async (req, res) => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.wid || req?.ctx?.workspaceId;
   const userId = req.user.id;
-  await assertUserInWorkspace(userId, workspaceId);
+
   try {
+    if (!workspaceId) {
+      return res.status(400).json({ message: "Workspace ID is required" });
+    }
+    await assertUserInWorkspace(userId, workspaceId);
+
     const {
       title,
       desc,
@@ -123,7 +129,6 @@ const createTicket = async (req, res) => {
         .json({ message: "title, desc, priority, ticket_type are required" });
     }
 
-    // Validate parent ticket belongs to same workspace
     if (parent_id) {
       const parent = await prisma.tickets.findUnique({
         where: { id: parent_id },
@@ -135,7 +140,6 @@ const createTicket = async (req, res) => {
       }
     }
 
-    // Validate assignee is a member of this workspace
     if (assigned_to) {
       const member = await prisma.userRole.findFirst({
         where: { user_id: assigned_to, workspace_id: workspaceId },
@@ -158,7 +162,7 @@ const createTicket = async (req, res) => {
           priority,
           created_by: userId,
           due_date: due_date ? new Date(due_date) : null,
-          assigned_to: assigned_to || userId, // default to creator if you want
+          assigned_to: assigned_to || userId,
           parent_id: parent_id || null,
         },
       });
@@ -196,7 +200,7 @@ const createTicket = async (req, res) => {
  * GET /workspaces/:id/tickets?status=&priority=&assignee=&q=&page=1&pageSize=20
  */
 const listTickets = async (req, res) => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.wid || req?.ctx?.workspaceId;
   const { status, priority, assignee, q, page = 1, pageSize = 20 } = req.query;
 
   try {
@@ -245,7 +249,6 @@ const listTickets = async (req, res) => {
   }
 };
 
-
 const getSubTasks = async (req, res) => {
   const { ticketId } = req.params;
   try {
@@ -289,13 +292,14 @@ const getTicketById = async (req, res) => {
     res.status(200).json(ticket);
   } catch (err) {
     console.error("getTicketById error:", err);
-    res.status(err.status ?? 500).json({ message: err.message || "Failed to fetch ticket" });
+    res
+      .status(err.status ?? 500)
+      .json({ message: err.message || "Failed to fetch ticket" });
   }
 };
 
-
 /**
- * PATCH /tickets/:ticketId
+ * PUT /tickets/:ticketId
  * Body: partial fields: { title?, desc?, status?, priority?, due_date?, assigned_to?, parent_id?, type? }
  */
 const updateTicket = async (req, res) => {
@@ -306,16 +310,26 @@ const updateTicket = async (req, res) => {
 
     // validations using current.workspace_id (unchanged)
     if (req.body.parent_id) {
-      const parent = await prisma.tickets.findUnique({ where: { id: req.body.parent_id } });
+      const parent = await prisma.tickets.findUnique({
+        where: { id: req.body.parent_id },
+      });
       if (!parent || parent.workspace_id !== current.workspace_id) {
-        return res.status(400).json({ message: "Invalid parent ticket for this workspace" });
+        return res
+          .status(400)
+          .json({ message: "Invalid parent ticket for this workspace" });
       }
     }
     if (req.body.assigned_to) {
       const member = await prisma.userRole.findFirst({
-        where: { user_id: req.body.assigned_to, workspace_id: current.workspace_id },
+        where: {
+          user_id: req.body.assigned_to,
+          workspace_id: current.workspace_id,
+        },
       });
-      if (!member) return res.status(400).json({ message: "Assignee is not a member of this workspace" });
+      if (!member)
+        return res
+          .status(400)
+          .json({ message: "Assignee is not a member of this workspace" });
     }
 
     // ⬇️ ONLY allow columns that exist on Tickets
@@ -334,7 +348,9 @@ const updateTicket = async (req, res) => {
     for (const k of Object.keys(req.body || {})) {
       if (!allowed.has(k)) continue;
       if (k === "due_date") {
-        updateData.due_date = req.body.due_date ? new Date(req.body.due_date) : null;
+        updateData.due_date = req.body.due_date
+          ? new Date(req.body.due_date)
+          : null;
       } else {
         updateData[k] = req.body[k];
       }
@@ -362,11 +378,11 @@ const updateTicket = async (req, res) => {
     res.status(200).json({ message: "Ticket updated", ticket: updated });
   } catch (err) {
     console.error("updateTicket error:", err);
-    res.status(err.status ?? 500).json({ message: err.message || "Failed to update ticket" });
+    res
+      .status(err.status ?? 500)
+      .json({ message: err.message || "Failed to update ticket" });
   }
 };
-
-
 
 /**
  * DELETE /tickets/:ticketId
@@ -376,7 +392,7 @@ const deleteTicket = async (req, res) => {
   const { ticketId } = req.params;
   const userId = req.user.id;
   try {
-    const current = await getTicketAndAssertAccess(ticketId, userId); // ⬅️ replace your current fetch
+    const current = await getTicketAndAssertAccess(ticketId, userId);
 
     await prisma.$transaction(async (tx) => {
       await writeHistory(
@@ -395,10 +411,11 @@ const deleteTicket = async (req, res) => {
     res.status(200).json({ message: "Ticket deleted" });
   } catch (err) {
     console.error("deleteTicket error:", err);
-    res.status(err.status ?? 500).json({ message: err.message || "Failed to delete ticket" });
+    res
+      .status(err.status ?? 500)
+      .json({ message: err.message || "Failed to delete ticket" });
   }
 };
-
 
 module.exports = {
   createTicket,

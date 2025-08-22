@@ -35,11 +35,6 @@ const createRoleBody = z.object({
     .nonempty(),
 });
 
-const usersToRoleBody = z.object({
-  user_ids: z.array(z.string().uuid()).nonempty(),
-});
-
-/* ------------------------- permission helpers ------------------------- */
 
 async function ensurePermission(entity, operation, tx = prisma) {
   return tx.permission.upsert({
@@ -168,10 +163,11 @@ async function createWorkspace(req, res) {
 
 // POST /workspaces/:wid/assign
 async function assignRolestoUsers(req, res) {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.wid || req.params.id || req?.ctx?.workspaceId;
+
   const { users = [], roles = [] } = req.body;
 
-  // Basic validation
+  // ---- Basic validation -----------------------------------------------------
   if (
     !Array.isArray(users) ||
     !Array.isArray(roles) ||
@@ -183,11 +179,25 @@ async function assignRolestoUsers(req, res) {
     });
   }
 
-  if (!hasPerm(req, "USER_ROLE", "CREATE"))
+  if (!workspaceId) {
+    return res.status(400).json({ message: "workspace id is required in path" });
+  }
+
+  if (!hasPerm(req, "USER_ROLE", "CREATE")) {
     return httpError(res, 403, "Access Denied : USER_ROLE:CREATE required");
+  }
 
   try {
-    // 1) Validate roles belong to the workspace
+    // (Optional) ensure workspace exists if you don't always run workspaceContext
+    const ws = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { id: true },
+    });
+    if (!ws) {
+      return res.status(404).json({ message: "Workspace not found" });
+    }
+
+    // ---- 1) Validate roles belong to the workspace --------------------------
     const roleIds = [...new Set(roles)];
     const wsRoles = await prisma.role.findMany({
       where: { id: { in: roleIds }, workspace_id: workspaceId },
@@ -202,7 +212,7 @@ async function assignRolestoUsers(req, res) {
       });
     }
 
-    // 2) Validate users exist
+    // ---- 2) Validate users exist -------------------------------------------
     const userIds = [...new Set(users)];
     const foundUsers = await prisma.users.findMany({
       where: { id: { in: userIds } },
@@ -217,40 +227,133 @@ async function assignRolestoUsers(req, res) {
       });
     }
 
-    // 3) Upsert each (user, workspace) with the given role
-    const ops = users.map((userId, i) =>
-      prisma.userRole.upsert({
-        where: {
-          user_id_workspace_id: { user_id: userId, workspace_id: workspaceId },
-        },
-        update: { role_id: roles[i] },
-        create: {
-          user_id: userId,
-          workspace_id: workspaceId,
-          role_id: roles[i],
-        },
-      })
+    // ---- 3) Build final mapping (last occurrence wins if duplicates) --------
+    const finalByUser = new Map();
+    users.forEach((uid, i) => finalByUser.set(uid, roles[i]));
+
+    const userIdsForThisRequest = Array.from(finalByUser.keys());
+    const rowsToCreate = userIdsForThisRequest.map((user_id) => ({
+      user_id,
+      workspace_id: workspaceId,
+      role_id: finalByUser.get(user_id),
+    }));
+
+    // ---- 4) Apply changes atomically (no composite unique required) ---------
+    await prisma.$transaction(
+      async (tx) => {
+        // Remove any existing assignment for these users in this workspace
+        await tx.userRole.deleteMany({
+          where: { workspace_id: workspaceId, user_id: { in: userIdsForThisRequest } },
+        });
+
+        // Write the new assignments (if any)
+        if (rowsToCreate.length) {
+          await tx.userRole.createMany({
+            data: rowsToCreate,
+            // skipDuplicates harmless; there is no unique on (user_id, workspace_id)
+            skipDuplicates: true,
+          });
+        }
+      },
+      // Optional isolation for better concurrency semantics on Postgres
+      { isolationLevel: "Serializable" }
     );
 
-    const results = await prisma.$transaction(ops);
-
-    // Optional: return enriched view
+    // ---- 5) Return enriched assignments ------------------------------------
     const enriched = await prisma.userRole.findMany({
-      where: { workspace_id: workspaceId, user_id: { in: userIds } },
-      include: {
-        role: true,
-        user: true,
-      },
+      where: { workspace_id: workspaceId, user_id: { in: userIdsForThisRequest } },
+      include: { role: true, user: true },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Roles assigned",
-      count: results.length,
+      count: rowsToCreate.length,
       assignments: enriched,
     });
   } catch (err) {
     console.error("bulkAssignRolesToUsers error:", err);
-    res.status(500).json({ message: "Failed to assign roles in bulk" });
+    return res.status(500).json({ message: "Failed to assign roles in bulk" });
+  }
+}
+
+// UPDATE: set a user's role in a workspace (replaces any existing assignment(s))
+// PUT /workspaces/:wid/user-roles
+// Body: { "user_id": "...", "role_id": "..." }
+async function updateAssignedRoleForUser(req, res) {
+  const workspaceId = req.params.wid || req.params.id || req?.ctx?.workspaceId;
+  const { user_id, role_id } = req.body || {};
+
+  if (!workspaceId) return res.status(400).json({ message: "workspace id is required in path" });
+  if (!user_id || !role_id)
+    return res.status(400).json({ message: "user_id and role_id are required" });
+
+  if (!hasPerm(req, "USER_ROLE", "UPDATE"))
+    return httpError(res, 403, "Access Denied : USER_ROLE:UPDATE required");
+
+  try {
+    const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } });
+    if (!ws) return res.status(404).json({ message: "Workspace not found" });
+
+    const user = await prisma.users.findUnique({ where: { id: user_id }, select: { id: true } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const role = await prisma.role.findFirst({
+      where: { id: role_id, workspace_id: workspaceId },
+      select: { id: true },
+    });
+    if (!role) {
+      return res.status(404).json({ message: "Role does not belong to this workspace" });
+    }
+
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.userRole.deleteMany({ where: { user_id, workspace_id: workspaceId } });
+        await tx.userRole.create({ data: { user_id, workspace_id: workspaceId, role_id } });
+      },
+      { isolationLevel: "Serializable" }
+    );
+
+    const assignment = await prisma.userRole.findFirst({
+      where: { user_id, workspace_id: workspaceId },
+      include: { user: true, role: true },
+    });
+
+    return res.status(200).json({ message: "Role updated for user", assignment });
+  } catch (err) {
+    console.error("updateAssignedRoleForUser error:", err);
+    return res.status(500).json({ message: "Failed to update user's role" });
+  }
+}
+
+// DELETE /workspaces/:wid/user-roles
+// Body: { "user_id": "...", "role_id": "..." }  // role_id optional; if omitted, removes ALL roles for the user in that workspace
+async function removeAssignedRolesForUser(req, res) {
+  const workspaceId = req.params.wid || req.params.id || req?.ctx?.workspaceId;
+  const { user_id, role_id } = req.body || {};
+
+  if (!workspaceId) return res.status(400).json({ message: "workspace id is required in path" });
+  if (!user_id) return res.status(400).json({ message: "user_id is required" });
+
+  if (!hasPerm(req, "USER_ROLE", "DELETE"))
+    return httpError(res, 403, "Access Denied : USER_ROLE:DELETE required");
+
+  try {
+    const user = await prisma.users.findUnique({ where: { id: user_id }, select: { id: true } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const where = role_id
+      ? { user_id, workspace_id: workspaceId, role_id }
+      : { user_id, workspace_id: workspaceId };
+
+    const result = await prisma.userRole.deleteMany({ where });
+
+    return res.status(200).json({
+      message: role_id ? "Role removed from user" : "All roles removed from user",
+      removed: result.count,
+    });
+  } catch (err) {
+    console.error("removeAssignedRolesForUser error:", err);
+    return res.status(500).json({ message: "Failed to remove user's role(s)" });
   }
 }
 
@@ -259,7 +362,7 @@ async function listRoles(req, res) {
   try {
     const wid = req.params.wid || req?.ctx?.workspaceId;
     if (!wid) return httpError(res, 400, "Missing workspace id");
-    if (!hasPerm(req, "ROLE", Operation.READ))
+    if (!hasPerm(req, "ROLE", "READ"))
       return httpError(res, 403, "Access Denied: ROLE:READ required");
     const roles = await prisma.role.findMany({
       where: { workspace_id: wid },
@@ -303,14 +406,14 @@ async function getUserWorkspaces(req, res) {
 
 async function getWorkspaceById(req, res) {
   try {
-    const { workspaceId } = req.params;
+    const wid = req.params.wid;
 
-    if (!workspaceId) {
+    if (!wid) {
       return res.status(400).json({ message: "Workspace ID is required" });
     }
 
     const workspace = await prisma.workspace.findUnique({
-      where: { id: workspaceId },
+      where: { id: wid },
       include: { admin: true, users: true, roles: true },
     });
 
@@ -330,7 +433,7 @@ async function createRole(req, res) {
   try {
     const wid = req.params.wid || req?.ctx?.workspaceId;
     if (!wid) return httpError(res, 400, "Missing workspace id");
-    if (!hasPerm(req, "ROLE", Operation.CREATE))
+    if (!hasPerm(req, "ROLE","CREATE"))
       return httpError(res, 403, "Forbidden: ROLE:CREATE required");
 
     const { name, desc, permissions } = createRoleBody.parse(req.body);
@@ -428,7 +531,7 @@ async function deleteRole(req, res) {
     const wid = req.params.wid || req?.ctx?.workspaceId;
     const roleId = req.params.roleId;
     if (!wid || !roleId) return httpError(res, 400, "Missing ids");
-    if (!hasPerm(req, "ROLE", Operation.DELETE))
+    if (!hasPerm(req, "ROLE", "DELETE"))
       return httpError(res, 403, "Access Denied: ROLE:DELETE required");
 
     const inUse = await prisma.userRole.findFirst({
@@ -452,60 +555,23 @@ async function deleteRole(req, res) {
       await tx.role.delete({ where: { id: roleId } });
     });
 
-    res.status(204).send();
+    res.status(204).send("Role deleted successfully");
   } catch (err) {
     const code = err.status ?? 500;
     res.status(code).json({ error: err.message || "Internal Server Error" });
   }
 }
 
-// POST /workspaces/:wid/roles/:roleId/users
-async function addUsersToRole(req, res) {
-  try {
-    const wid = req.params.wid || req?.ctx?.workspaceId;
-    const roleId = req.params.roleId;
-    if (!wid || !roleId) return httpError(res, 400, "Missing ids");
-    if (!hasPerm(req, "USERROLE", Operation.CREATE))
-      return httpError(res, 403, "Access Denied : USER_ROLE:CREATE required");
-
-    const { user_ids } = usersToRoleBody.parse(req.body);
-
-    const role = await prisma.role.findFirst({
-      where: { id: roleId, workspace_id: wid },
-    });
-    if (!role) return httpError(res, 404, "Role not found in this workspace");
-
-    const users = await prisma.users.findMany({
-      where: { id: { in: user_ids } },
-      select: { id: true },
-    });
-    if (users.length !== user_ids.length)
-      return httpError(res, 404, "One or more users not found");
-
-    await prisma.userRole.createMany({
-      data: users.map((u) => ({
-        user_id: u.id,
-        role_id: roleId,
-        workspace_id: wid,
-      })),
-      skipDuplicates: true,
-    });
-
-    res.status(200).json({ assigned: users.length });
-  } catch (err) {
-    const code = err.status ?? 500;
-    res.status(code).json({ error: err.message || "Internal Server Error" });
-  }
-}
 
 module.exports = {
   createWorkspace,
   assignRolestoUsers,
+  updateAssignedRoleForUser,
+  removeAssignedRolesForUser,
   getUserWorkspaces,
   getWorkspaceById,
   listRoles,
   createRole,
   updateRole,
   deleteRole,
-  addUsersToRole,
 };

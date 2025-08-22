@@ -17,7 +17,7 @@ const { authorize } = require("../middlewares/authorize");
 
 // workpace-id
 router.post(
-  "/:id/create-tickets",
+  "/:wid/create-tickets",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
@@ -26,7 +26,7 @@ router.post(
 );
 
 router.get(
-  "/:id/tickets",
+  "/:wid/tickets",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
@@ -38,7 +38,7 @@ router.get(
 router.get(
   "/:ticketId/getTicket",
   authenticate,
-  workspaceContext,
+  // workspaceContext,
   loadUserRoleInWorkspace,
   authorize("TICKET", "READ"),
   getTicketById
@@ -47,7 +47,7 @@ router.get(
 router.get(
   "/:ticketId/subtickets",
   authenticate,
-  workspaceContext,
+  // workspaceContext,
   loadUserRoleInWorkspace,
   authorize("TICKET", "READ"),
   getSubTasks
@@ -56,7 +56,7 @@ router.get(
 router.put(
   "/:ticketId/updateTicket",
   authenticate,
-  workspaceContext,
+  // workspaceContext,
   loadUserRoleInWorkspace,
   authorize("TICKET", "UPDATE"),
   updateTicket
@@ -65,7 +65,7 @@ router.put(
 router.delete(
   "/:ticketId/deleteTicket",
   authenticate,
-  workspaceContext,
+  // workspaceContext,
   loadUserRoleInWorkspace,
   authorize("TICKET", "DELETE"),
   deleteTicket

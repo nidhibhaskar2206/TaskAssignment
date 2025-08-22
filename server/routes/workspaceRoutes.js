@@ -9,13 +9,14 @@ const { authorize } = require("../middlewares/authorize");
 const {
   createWorkspace,
   assignRolestoUsers,
+  updateAssignedRoleForUser,
+  removeAssignedRolesForUser,
   getUserWorkspaces,
   getWorkspaceById,
   listRoles,
   createRole,
   updateRole,
   deleteRole,
-  addUsersToRole,
 } = require("../controllers/workspaceController");
 
 const router = express.Router();
@@ -35,6 +36,24 @@ router.post(
   authorize("USER_ROLE", "CREATE"),
   assignRolestoUsers
 );
+
+router.put(
+  "/workspaces/:wid/user-roles",
+  authenticate,
+  workspaceContext,
+  loadUserRoleInWorkspace,
+  authorize("USER_ROLE", "UPDATE"),
+  updateAssignedRoleForUser
+)
+
+router.delete(
+  "/workspaces/:wid/user-roles",
+  authenticate,
+  workspaceContext,
+  loadUserRoleInWorkspace,
+  authorize("USER_ROLE", "DELETE"),
+  removeAssignedRolesForUser
+)
 
 router.get(
   "/workspaces/:wid/roles",
@@ -59,7 +78,7 @@ router.post(
 );
 
 router.put(
-  "/workspaces/:wid/roles/:roleName",
+  "/workspaces/:wid/roles/:roleId",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
@@ -76,13 +95,5 @@ router.delete(
   deleteRole
 );
 
-router.post(
-  "/workspaces/:wid/roles/:roleId/users",
-  authenticate,
-  workspaceContext,
-  loadUserRoleInWorkspace,
-  authorize("USER_ROLE", "CREATE"),
-  addUsersToRole
-);
 
 module.exports = router;
