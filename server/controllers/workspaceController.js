@@ -305,6 +305,10 @@ async function updateAssignedRoleForUser(req, res) {
       return res.status(404).json({ message: "Role does not belong to this workspace" });
     }
 
+    if(role.name === "Admin" && req.user.user_type !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Only Super Admin can update Admin role" });
+    }
+
     await prisma.$transaction(
       async (tx) => {
         await tx.userRole.deleteMany({ where: { user_id, workspace_id: workspaceId } });
@@ -344,6 +348,18 @@ async function removeAssignedRolesForUser(req, res) {
     const where = role_id
       ? { user_id, workspace_id: workspaceId, role_id }
       : { user_id, workspace_id: workspaceId };
+
+      const role = await prisma.role.findFirst({
+        where: { id: role_id, workspace_id: workspaceId },
+        select: { id: true },
+      });
+      if (!role) {
+        return res.status(404).json({ message: "Role does not belong to this workspace" });
+      }
+  
+      if(role.name === "Admin" && req.user.user_type !== "SUPER_ADMIN") {
+        return res.status(403).json({ message: "Only Super Admin can remove Admin role" });
+      }
 
     const result = await prisma.userRole.deleteMany({ where });
 
