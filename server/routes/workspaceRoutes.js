@@ -17,6 +17,8 @@ const {
   createRole,
   updateRole,
   deleteRole,
+  updateRolePermissions,
+  removePermissionsFromRole,
 } = require("../controllers/workspaceController");
 
 const router = express.Router();
@@ -95,5 +97,22 @@ router.delete(
   deleteRole
 );
 
+router.patch(
+  "/workspaces/:wid/roles/:roleId/permissions",
+  authenticate,
+  workspaceContext,
+  loadUserRoleInWorkspace,
+  authorize("ROLE", "UPDATE"),
+  updateRolePermissions
+)
+
+router.patch(
+  "/workspaces/:wid/roles/:roleId/permissions/remove",
+  authenticate,
+  workspaceContext,
+  loadUserRoleInWorkspace,
+  authorize("ROLE", "UPDATE"),
+  removePermissionsFromRole
+);
 
 module.exports = router;
