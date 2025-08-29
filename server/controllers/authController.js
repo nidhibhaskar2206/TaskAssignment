@@ -6,7 +6,7 @@ const prisma = require("../config/db");
 const redis = require("../config/redis");
 
 const THROTTLE_SECONDS = 15; 
-const OTP_TTL_SECONDS = 600; 
+const OTP_TTL_SECONDS = 600;  
 
 const registerUser = async (req, res) => {
   try {
@@ -106,9 +106,9 @@ const loginUser = async (req, res) => {
       return res.status(401).json({ message: "Invalid password" });
     }
 
-    const token = jwt.sign({ userId: user.id, email: user.email },process.env.JWT_SECRET);
+    const token = jwt.sign({ userId: user.id, email: user.email},process.env.JWT_SECRET);
 
-    res.status(200).json({ message: "Login successful", token, user: { name: user.name, email: user.email } });
+    res.status(200).json({ message: "Login successful", token, user: { name: user.name, email: user.email, role: user.user_type  } });
   } catch (error) {
     console.error("Login error:", error);
     res.status(500).json({ message: "Something went wrong" });

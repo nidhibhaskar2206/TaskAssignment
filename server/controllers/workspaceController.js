@@ -160,6 +160,35 @@ async function createWorkspace(req, res) {
   }
 }
 
+async function getAllWorkspaces(req, res) {
+  requireSuperAdmin(req);
+  try{
+    const workspaces = await prisma.workspace.findMany();
+    return res.status(200).json({
+      workspaces
+    })
+  }catch(error){
+    console.error(error)
+    res.status(500).json("Internal server error")
+  }
+}
+
+
+async function getAllUsers(req, res) {
+  requireSuperAdmin(req);
+  try{
+    const users = await prisma.users.findMany({
+      where: {user_type: "OTHER"}
+    });
+    return res.status(200).json({
+      users
+    })
+  }catch(error){
+    console.error(error)
+    res.status(500).json("Internal server error")
+  }
+}
+
 // POST /workspaces/:wid/assign
 async function assignRolestoUsers(req, res) {
   const workspaceId = req.params.wid || req.params.id || req?.ctx?.workspaceId;
@@ -717,6 +746,8 @@ async function removePermissionsFromRole(req, res) {
 
 module.exports = {
   createWorkspace,
+  getAllWorkspaces,
+  getAllUsers,
   assignRolestoUsers,
   updateAssignedRoleForUser,
   removeAssignedRolesForUser,

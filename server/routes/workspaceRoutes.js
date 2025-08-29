@@ -8,6 +8,8 @@ const { authorize } = require("../middlewares/authorize");
 
 const {
   createWorkspace,
+  getAllWorkspaces,
+  getAllUsers,
   assignRolestoUsers,
   updateAssignedRoleForUser,
   removeAssignedRolesForUser,
@@ -29,6 +31,19 @@ router.post(
   authorize("WORKSPACE", "CREATE"),
   createWorkspace
 );
+
+router.get(
+  "/get-workspaces",
+  authenticate,
+  authorize("WORKSPACE", "READ"),
+  getAllWorkspaces
+)
+
+router.get(
+  "/get-users",
+  authenticate,
+  getAllUsers
+)
 
 router.post(
   "/workspaces/:wid/assign",

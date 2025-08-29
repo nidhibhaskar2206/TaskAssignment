@@ -16,7 +16,7 @@ const router = express.Router();
 
 // Create a comment on a ticket
 router.post(
-  "/tickets/:ticketId/comments",
+  "/:wid/tickets/:ticketId/comments",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
@@ -25,8 +25,8 @@ router.post(
 );
 
 // Update a comment
-router.patch(
-  "/comments/:commentId",
+router.put(
+  "/:wid/comments/:commentId",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
@@ -36,7 +36,7 @@ router.patch(
 
 // Delete a comment
 router.delete(
-  "/comments/:commentId",
+  "/:wid/comments/:commentId",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
@@ -46,7 +46,7 @@ router.delete(
 
 // Get all comments for a ticket
 router.get(
-  "/tickets/:ticketId/comments",
+  "/:wid/tickets/:ticketId/comments",
   authenticate,
   workspaceContext,
   loadUserRoleInWorkspace,
