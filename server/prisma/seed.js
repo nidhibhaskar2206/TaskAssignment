@@ -22,7 +22,7 @@ async function main() {
 
   // SUPER_ADMIN
   const existingAdmin = await prisma.users.findUnique({
-    where: { email: "gauravlucifer20@gmail.com" },
+    where: { email: "bhaskarnidhi2206@gmail.com" },
   });
 
   if (!existingAdmin) {
@@ -30,8 +30,8 @@ async function main() {
 
     await prisma.users.create({
       data: {
-        name: "ADMIN",
-        email: "gauravlucifer20@gmail.com",
+        name: "SUPER ADMIN",
+        email: "bhaskarnidhi2206@gmail.com",
         password: hashedPassword,
         user_type: UserType.SUPER_ADMIN,
         is_verified: true,
@@ -46,7 +46,7 @@ async function main() {
 
   // 3 Normal Users
   // prisma/seed.js (fixed users loop)
-  const hashedUserPassword = await bcrypt.hash("User@1234", 10);
+  const hashedUserPassword = await bcrypt.hash("User@1234", 3);
   const userData = Array.from({ length: 3 }, (_, i) => ({
     name: `User ${i + 1}`,
     email: `user${i + 1}@example.com`,

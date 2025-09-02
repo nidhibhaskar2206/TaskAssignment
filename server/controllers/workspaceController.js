@@ -556,7 +556,8 @@ async function updateRole(req, res) {
           )
         );
 
-        await tx.rolePermission.deleteMany({ where: { role_id: role.id } });
+        // await tx.rolePermission.deleteMany({ where: { role_id: role.id } });
+        
 
         if (permRows.length) {
           await tx.rolePermission.createMany({

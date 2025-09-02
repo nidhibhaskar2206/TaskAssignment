@@ -5,9 +5,10 @@ const prisma = new PrismaClient();
 
 function parseBearer(header) {
   if (!header) return null;
-  const [scheme, token] = header.split(" ");
-  if (!/^Bearer$/i.test(scheme) || !token) return null;
-  return token;
+  const [scheme, token] = header.split(" ").filter(Boolean);
+  if (!/^Bearer$/i.test(scheme)) return null;
+  if (!token || token === "undefined" || token === "null") return null;
+  return token.replace(/^"(.+)"$/, "$1").trim();
 }
 
 async function authenticate(req, res, next) {
